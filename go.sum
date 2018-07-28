@@ -1,0 +1,6 @@
+github.com/Wing924/shellwords v1.0.0 h1:bcKvOHbzFlrdh7TmSzqdYUVqCLlQ1B5aNx/EFfZMd40=
+github.com/Wing924/shellwords v1.0.0/go.mod h1:0ow0K1A0tSuh2zlialiiqSIBN840aqFuD0MCE3qD6+M=
+github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51 h1:Z9n2FFNUXsshfwJMBgNA0RU6/i7WVaAegv3PtuIHPMs=
+github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51/go.mod h1:CzGEWj7cYgsdH8dAjBGEr58BoE7ScuLd+fwFZ44+/x8=
+github.com/mattn/go-shellwords v1.0.3 h1:K/VxK7SZ+cvuPgFSLKi5QPI9Vr/ipOf4C1gN+ntueUk=
+github.com/mattn/go-shellwords v1.0.3/go.mod h1:3xCvwCdWdlDJUrvuMn7Wuy9eWs4pE8vqg+NOMyg4B2o=
