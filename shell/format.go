@@ -5,7 +5,6 @@ package shell
 import (
 	"fmt"
 	shellquote "github.com/kballard/go-shellquote"
-	"regexp"
 	"strings"
 )
 
@@ -86,34 +85,4 @@ func ScriptPrintf(scriptformat string, vs ...interface{}) string {
 		escaped[i] = string(Escape(v))
 	}
 	return fmt.Sprintf(scriptformat, vs...)
-}
-
-type Params map[string]interface{}
-
-type scriptTemplater struct {
-	OpenDelim  string
-	CloseDelim string
-}
-
-var defaultScriptTemplater = &scriptTemplater{
-	OpenDelim:  `#{`,
-	CloseDelim: `}`,
-}
-
-func (st *scriptTemplater) Pattern(name string) *regexp.Regexp {
-	open := regexp.QuoteMeta(st.OpenDelim)
-	close := regexp.QuoteMeta(st.CloseDelim)
-	quoted := regexp.QuoteMeta(name)
-	return regexp.MustCompile(open + ` *` + quoted + ` *` + close)
-}
-
-func (st *scriptTemplater) RawPattern(name string) *regexp.Regexp {
-	open := regexp.QuoteMeta(st.OpenDelim)
-	close := regexp.QuoteMeta(st.CloseDelim)
-	quoted := regexp.QuoteMeta(name)
-	return regexp.MustCompile(open + ` *raw *` + quoted + ` *` + close)
-}
-
-func (st *scriptTemplater) Template(template string, vs ...interface{}) string {
-	return "not implemented"
 }
