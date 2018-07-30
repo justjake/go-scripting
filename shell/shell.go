@@ -1,5 +1,7 @@
 package shell
 
+//go:generate go run static_compose.go -in . -out shell_format_methods.go
+
 import (
 	"bytes"
 	"context"
@@ -52,6 +54,8 @@ func WithContext(ctx context.Context) *Shell {
 //
 //   cmd := shell.Cmd(`echo 'hello world'`)
 //   output, err := cmd.Output()
+//
+// +StaticCompose inside:"formatters"
 func (sh *Shell) Cmd(script string) *exec.Cmd {
 	if len(sh.DefaultArgs) == 0 {
 		sh.DefaultArgs = DefaultShell
@@ -68,6 +72,8 @@ func (sh *Shell) Cmd(script string) *exec.Cmd {
 // Out captures the Stdout of a script and returns it as a string, minus the
 // last trailing newline. This is analagous to `$(...)` in Bash. If an error
 // occurs, it will be printed to the default Stderr.
+//
+// +StaticCompose inside:"formatters"
 func (sh *Shell) Out(script string) string {
 	cmd := sh.Cmd(script)
 	cmd.Stderr = sh.Stderr
@@ -79,6 +85,8 @@ func (sh *Shell) Out(script string) string {
 // OutStatus captures the Stdout of a script and returns it as a string, minus
 // the last trailing newline. If an error occurs or the command exits non-zero,
 // a non-nil error is returned.
+//
+// +StaticCompose inside:"formatters"
 func (sh *Shell) OutStatus(script string) (string, error) {
 	cmd := sh.Cmd(script)
 	cmd.Stderr = sh.Stderr
@@ -90,6 +98,8 @@ func (sh *Shell) OutStatus(script string) (string, error) {
 // OutErrStatus captures the Stdout and Stderr of a script and returns each as
 // a string, minus the last trailing newline. If an error occurs or the command
 // exits non-zero, a non-nil error is returned.
+//
+// +StaticCompose inside:"formatters"
 func (sh *Shell) OutErrStatus(script string) (string, string, error) {
 	var stderr bytes.Buffer
 	cmd := sh.Cmd(script)
@@ -100,6 +110,8 @@ func (sh *Shell) OutErrStatus(script string) (string, string, error) {
 }
 
 // Run runs the given script to completion.
+//
+// +StaticCompose inside:"formatters"
 func (sh *Shell) Run(script string) error {
 	cmd := sh.Cmd(script)
 	cmd.Stdout = sh.Stdout
@@ -111,6 +123,8 @@ func (sh *Shell) Run(script string) error {
 
 // Succeeds runs the script and returns true if the script exited 0, or false
 // otherise.
+//
+// +StaticCompose inside:"formatters"
 func (sh *Shell) Succeeds(script string) bool {
 	err := sh.Run(script)
 	return err == nil

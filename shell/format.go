@@ -63,6 +63,8 @@ func stringly(v interface{}) bool {
 // It returns the number of bytes written and any write error encountered.
 // but: any non-Raw values will be escaped first
 //   ScriptPrint(`cat `, filename, ` | grep -v `, regexp, ` tee log`)
+//
+// +StaticCompose group:"formatters" append:"p"
 func ScriptPrint(vs ...interface{}) string {
 	var b strings.Builder
 	for i := 0; i < len(vs); i++ {
@@ -79,6 +81,8 @@ func ScriptPrint(vs ...interface{}) string {
 // converted to strings and escaped, so you should use only the %s, %v, or %q
 // formatters.
 //   ScriptPrintf(`cat %s | grep -v %s | tee log`, filename, regexp)
+//
+// +StaticCompose group:"formatters" append:"f"
 func ScriptPrintf(scriptformat string, vs ...interface{}) string {
 	escaped := make([]interface{}, len(vs))
 	for i, v := range vs {
