@@ -1,6 +1,6 @@
 package main
 
-//+build ignore
+// +build ignore
 
 import (
 	"bytes"
