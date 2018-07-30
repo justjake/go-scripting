@@ -12,6 +12,7 @@ import (
 	"go/printer"
 	"go/token"
 	"golang.org/x/tools/imports"
+	"io/ioutil"
 	"log"
 	"reflect"
 	"strings"
@@ -23,8 +24,8 @@ const (
 )
 
 var (
-	in  = flag.String("in", ".", "Directory of go files to process")
-	out = flag.String("out", "static_compose_generated.go", "Output file")
+	in      = flag.String("in", ".", "Directory of go files to process")
+	outPath = flag.String("out", "static_compose_generated.go", "Output file")
 )
 
 type visitor struct {
@@ -262,5 +263,5 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println(string(outFormat))
+	ioutil.WriteFile(*outPath, outFormat, 0755)
 }
