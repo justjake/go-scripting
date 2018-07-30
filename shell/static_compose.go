@@ -7,9 +7,11 @@ import (
 	"flag"
 	"fmt"
 	"go/ast"
+	"go/format"
 	"go/parser"
 	"go/printer"
 	"go/token"
+	"golang.org/x/tools/imports"
 	"log"
 	"reflect"
 	"strings"
@@ -201,6 +203,7 @@ func (c *staticCompose) Render() string {
 }
 
 const composed = `
+// {{.InnerName}}{{.OuterAppend}} is equivalent to {{.InnerRecv}}{{.InnerName}}({{.OuterName}}({{.OuterArgsList}}))
 func {{.InnerRecvDecl}} {{.InnerName}}{{.OuterAppend}}{{.OuterArgsDecl}} {{.InnerReturnDecl}} {
 	return {{.InnerRecv}}{{.InnerName}}({{.OuterName}}({{.OuterArgsList}}))
 }
@@ -246,7 +249,18 @@ func main() {
 			}
 			log.Printf("Put inside %q: outer: %s, inner: %s", d.Inside, funcString(fset, g.FuncDecl), funcString(fset, d.FuncDecl))
 			c := &staticCompose{fset, d, g}
-			log.Println(c.Render())
+			//log.Println(c.Render())
+			out.WriteRune('\n')
+			out.WriteString(c.Render())
 		}
 	}
+	outImports, err := imports.Process("wat", out.Bytes(), nil)
+	if err != nil {
+		panic(err)
+	}
+	outFormat, err := format.Source(outImports)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(string(outFormat))
 }
