@@ -32,6 +32,8 @@ type Shell struct {
 	IgnoreUnexpectedErrors bool
 	// If true, methods will not chomp the last newline of a command's stdout or stderr.
 	PreserveTrailingNewline bool
+	// If set, will be used to generate a command instead of the default method.
+	MakeCmd func(script string) *exec.Cmd
 	// Will be added to any commands if not nil
 	ctx context.Context
 	// Sometimes useful to reference the status of Succeeds or Cmd invocations

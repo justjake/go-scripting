@@ -1,6 +1,6 @@
-package main
-
 // +build ignore
+
+package main
 
 import (
 	"bytes"
@@ -13,8 +13,10 @@ import (
 	"go/token"
 	"golang.org/x/tools/imports"
 	"io/ioutil"
-	"log"
+	"os"
+	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"text/template"
 )
@@ -39,15 +41,14 @@ func (v *visitor) Visit(node ast.Node) ast.Visitor {
 
 // Scan the file for comments which may contain directives, and process those.
 func (v *visitor) VisitFile(file *ast.File) {
-	cmap := ast.NewCommentMap(v.fset, file, file.Comments)
 	for _, node := range file.Decls {
 		if fdecl, ok := node.(*ast.FuncDecl); ok {
-			v.VisitFuncDecl(fdecl, cmap, file)
+			v.VisitFuncDecl(fdecl, file)
 		}
 	}
 }
 
-func (v *visitor) VisitFuncDecl(decl *ast.FuncDecl, cmap ast.CommentMap, file *ast.File) {
+func (v *visitor) VisitFuncDecl(decl *ast.FuncDecl, file *ast.File) {
 	if decl.Doc == nil {
 		return
 	}
@@ -71,14 +72,12 @@ func (v *visitor) ParseCommentGroup(cg *ast.CommentGroup) *directive {
 			continue
 		}
 		rest := strings.TrimPrefix(trimmed, marker+` `)
-		log.Println("Found directive: ", trimmed)
 		tags := reflect.StructTag(rest)
 		d := &directive{
 			Inside: tags.Get("inside"),
 			Group:  tags.Get("group"),
 			Append: tags.Get("append"),
 		}
-		log.Printf("Parsed directive: %#v", d)
 		return d
 	}
 	return nil
@@ -228,27 +227,31 @@ func main() {
 		if firstPackage == "" || firstPackage == "main" {
 			firstPackage = name
 		}
-		for _, f := range p.Files {
-			v.VisitFile(f)
+		fnames := make([]string, 0, len(p.Files))
+		for n, _ := range p.Files {
+			fnames = append(fnames, n)
+		}
+		sort.Strings(fnames)
+		for _, n := range fnames {
+			v.VisitFile(p.Files[n])
 		}
 	}
 	var out bytes.Buffer
 	// this is a hack.
 	fmt.Fprintf(&out, "package %s\n", firstPackage)
+	fmt.Fprintln(&out, "")
+	fmt.Fprintf(&out, "// AUTO-GENERATED WITH %s %v", filepath.Base(os.Args[0]), os.Args[1:])
 	for _, d := range v.directives {
 		if d.Inside == "" {
 			continue
 		}
-		//proto := *d.FuncDecl
-		//proto.Body = nil
-		//proto.Doc = nil
-		log.Printf("Put inside %q: %s", d.Inside, funcString(fset, d.FuncDecl))
-		// n^2 here we come
+		//log.Printf("Put inside %q: %s", d.Inside, funcString(fset, d.FuncDecl))
+		// n^2 here we come.
 		for _, g := range v.directives {
 			if g.Group != d.Inside {
 				continue
 			}
-			log.Printf("Put inside %q: outer: %s, inner: %s", d.Inside, funcString(fset, g.FuncDecl), funcString(fset, d.FuncDecl))
+			fmt.Printf("Put inside %q: outer: %s, inner: %s\n", d.Inside, funcString(fset, g.FuncDecl), funcString(fset, d.FuncDecl))
 			c := &staticCompose{fset, d, g}
 			//log.Println(c.Render())
 			out.WriteRune('\n')
@@ -263,5 +266,5 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	ioutil.WriteFile(*outPath, outFormat, 0755)
+	ioutil.WriteFile(*outPath, outFormat, 0644)
 }
