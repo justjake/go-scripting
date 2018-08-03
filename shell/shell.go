@@ -1,6 +1,7 @@
 package shell
 
 //go:generate go1.11beta2 run ../bin/static_compose.go -in . -out shell_format_methods.go
+//go:generate bash ../bin/generate_shell_interface.sh shell_interface.go
 
 import (
 	"bytes"

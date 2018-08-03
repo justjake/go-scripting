@@ -4,5 +4,6 @@ require (
 	github.com/Wing924/shellwords v1.0.0
 	github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51
 	github.com/mattn/go-shellwords v1.0.3 // indirect
+	github.com/rjeczalik/interfaces v0.0.0-20170614120117-3c33efd8b17c // indirect
 	golang.org/x/tools v0.0.0-20180727195141-8cc4e8a6f484
 )
