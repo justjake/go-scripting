@@ -31,11 +31,11 @@ const openDelim = `#{`
 const closeDelim = `}`
 const spaces = ` *`
 const name = `(?P<name>[\w-_]+)`
-const raw = `(?P<raw>raw)?`
+const raw = `(?P<raw>raw +)?`
 
 var openDelimQ = regexp.QuoteMeta(openDelim)
 var closeDelimQ = regexp.QuoteMeta(closeDelim)
-var matcher = regexp.MustCompile(openDelimQ + spaces + raw + ` +` + name + spaces + closeDelimQ)
+var matcher = regexp.MustCompile(openDelimQ + spaces + raw + name + spaces + closeDelimQ)
 
 // ScriptTemplate renders a template of a shell script using the provided
 // variables.
@@ -54,15 +54,9 @@ func ScriptTemplate(template string, vars Lookuper) string {
 	used := make(map[string]bool)
 	return matcher.ReplaceAllStringFunc(template, func(match string) string {
 		submatch := matcher.FindStringSubmatch(match)
-		var raw bool
-		var name string
-		if len(submatch) == 2 {
-			raw = true
-			name = submatch[1]
-		} else {
-			raw = false
-			name = submatch[0]
-		}
+		fmt.Printf("match: %q, submatch: %#v", match, submatch)
+		raw := submatch[1] != ""
+		name := submatch[2]
 
 		val, err := vars.Lookup(name)
 		if err != nil {
@@ -71,10 +65,17 @@ func ScriptTemplate(template string, vars Lookuper) string {
 
 		used[name] = true
 
+		var res string
 		if raw {
-			return string(ToRaw(val))
+			fmt.Printf(", RAW")
+			res = string(ToRaw(val))
+		} else {
+			fmt.Printf(", needs cooking")
+			res = string(Escape(val))
 		}
-		return string(Escape(val))
+
+		fmt.Printf(", splice: %q\n", res)
+		return res
 	})
 }
 
