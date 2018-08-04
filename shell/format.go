@@ -12,20 +12,15 @@ import (
 // scripts using the other functions in this package.
 type Raw string
 
+func (r Raw) GoString() string {
+	return fmt.Sprintf("shell.Raw(%#v)", string(r))
+}
+
 // ToRaw coerces any value into an unescaped string for the purposes of
 // shell command construction using fmt.Sprint.
 func ToRaw(v interface{}) Raw {
 	s := fmt.Sprint(v)
 	return Raw(s)
-}
-
-// Rawf renders a format string with the given values into an unescaped
-// string for the purposes of shell command construction.
-//
-// For example, to produce the result Raw("--price=12.10"), one might call
-// Rawf("--price=%.2f", 12.1)
-func Rawf(p string, vs ...interface{}) Raw {
-	return Raw(fmt.Sprintf(p, vs...))
 }
 
 // Escape a value.
@@ -62,13 +57,13 @@ func stringly(v interface{}) bool {
 // standard output. Spaces are added between operands when neither is a string.
 // It returns the number of bytes written and any write error encountered.
 // but: any non-Raw values will be escaped first
-//   ScriptPrint(`cat `, filename, ` | grep -v `, regexp, ` tee log`)
+//   ScriptPrint(Raw(`cat `), filename, Raw(` | grep -v `, regexp, ` tee log`))
 //
 // +StaticCompose group:"formatters" append:"p"
 func ScriptPrint(vs ...interface{}) string {
 	var b strings.Builder
 	for i := 0; i < len(vs); i++ {
-		if i != 0 && stringly(vs[i-1]) && stringly(vs[i]) {
+		if i != 0 && !stringly(vs[i-1]) && !stringly(vs[i]) {
 			b.WriteRune(' ')
 		}
 		b.WriteString(string(Escape(vs[i])))
@@ -88,5 +83,5 @@ func ScriptPrintf(scriptformat string, vs ...interface{}) string {
 	for i, v := range vs {
 		escaped[i] = string(Escape(v))
 	}
-	return fmt.Sprintf(scriptformat, vs...)
+	return fmt.Sprintf(scriptformat, escaped...)
 }
