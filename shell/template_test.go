@@ -27,3 +27,16 @@ func TestScriptTemplate(t *testing.T) {
 		}
 	}
 }
+
+func TestScriptTemplatePanics(t *testing.T) {
+	defer func() {
+		expectedError := "Template contained expansion for variable, but lookup failed: \"notokay\": \"notokay\" not in shell.Vars{\"ok\":1}"
+		err := recover().(error)
+		if err.Error() != expectedError {
+			t.Errorf("%q != %q", err.Error(), expectedError)
+		}
+	}()
+
+	ScriptTemplate("foo #{ok} bar #{notokay}", Vars{"ok": 1})
+	t.Errorf("ScriptTemplate should panic")
+}

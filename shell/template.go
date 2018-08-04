@@ -24,7 +24,7 @@ func (vars Vars) Lookup(name string) (interface{}, error) {
 		return val, nil
 	}
 
-	return nil, fmt.Errorf("Var %q not found in %+v", name, vars)
+	return nil, fmt.Errorf("%q not in %#v", name, vars)
 }
 
 const openDelim = `#{`
@@ -54,27 +54,23 @@ func ScriptTemplate(template string, vars Lookuper) string {
 	used := make(map[string]bool)
 	return matcher.ReplaceAllStringFunc(template, func(match string) string {
 		submatch := matcher.FindStringSubmatch(match)
-		fmt.Printf("match: %q, submatch: %#v", match, submatch)
 		raw := submatch[1] != ""
 		name := submatch[2]
 
 		val, err := vars.Lookup(name)
 		if err != nil {
-			panic(fmt.Errorf(`Template contained expansion for variable, but it was not provided: %q: %v`, name, err))
+			panic(fmt.Errorf(`Template contained expansion for variable, but lookup failed: %q: %v`, name, err))
 		}
 
 		used[name] = true
 
 		var res string
 		if raw {
-			fmt.Printf(", RAW")
 			res = string(ToRaw(val))
 		} else {
-			fmt.Printf(", needs cooking")
 			res = string(Escape(val))
 		}
 
-		fmt.Printf(", splice: %q\n", res)
 		return res
 	})
 }
