@@ -31,4 +31,5 @@ var mockShellInterface Interface = &MockShell{}
 var shellInterface Interface = &Shell{}
 EOS
 ) > "$tmpfile"
+
 cp "$tmpfile" "$out"
