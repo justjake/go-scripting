@@ -17,11 +17,13 @@ type Vars struct {
 	// If defined, this function is used to look up variables not found in
 	// Locals. Otherwise, an Vars will look at the vars.ronment variables.
 	LookupParent func(name string) (val string, found bool)
+	// Stores memoized values
+	memo map[string]string
 }
 
 // NewVars constructs a new Vars.
 func NewVars() *Vars {
-	return &Vars{make(map[string]string), nil}
+	return &Vars{make(map[string]string), nil, make(map[string]string)}
 }
 
 // LookupEnv returns the value for the given variable name and true if the
@@ -72,26 +74,19 @@ func (vars *Vars) IsSet(name string) bool {
 	return set
 }
 
-// MemoGetter returns a function that will get the given variable from this
-// vars.ronment, or call `compute` a single time to compute the default if the
-// value in the vars.ronemnt is empty.
-func (vars *Vars) MemoGetter(name string, compute func() string) func() string {
-	memod := Memoize(compute)
-	return func() string {
-		if val := vars.Get(name, ""); val != "" {
-			return val
-		}
-
-		return memod()
+// GetMemo returns the named variable if it is defined, or it calls the compute
+// function at once and caches its return value.
+func (vars *Vars) GetMemo(name string, compute func() string) string {
+	if val, found := vars.LookupEnv(name); found {
+		return val
 	}
-}
-
-// DefaultGetter returns a function that will get the given name from this
-// vars.ronment, or return the default value if it is empty.
-func (vars *Vars) DefaultGetter(name string, other string) func() string {
-	return func() string {
-		return vars.Get(name, other)
+	if val, found := vars.memo[name]; found {
+		return val
 	}
+
+	val := compute()
+	vars.memo[name] = val
+	return val
 }
 
 // Lookup implements shell.Lookuper
@@ -101,20 +96,4 @@ func (vars *Vars) Lookup(name string) (val interface{}, err error) {
 		return "", fmt.Errorf("Not defined: %q", name)
 	}
 	return stringVal, nil
-}
-
-// Memoize wraps a function so that it will only be called once. Repeated calls
-// to the function will return the result cached from the first call.
-func Memoize(fn func() string) func() string {
-	memoized := false
-	value := ""
-	return func() string {
-		if memoized {
-			return value
-		}
-
-		value = fn()
-		memoized = true
-		return value
-	}
 }
