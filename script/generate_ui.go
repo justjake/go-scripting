@@ -24,8 +24,33 @@ const templateRaw = `package {{ .Package }}
 
 import "{{ .ImportPath }}"
 
-// UI is an auto-generated script.UI that describes this program's commands and arguments.
-var UI = {{ .UI }}
+type generatedUI struct {
+	// It's up to you to set 'UI.Implementation = &yourImpl{}' in your main().
+	Impl {{ .Recv }}
+	script.UI
+}
+
+func (ui *generatedUI) getCommandMethod(commandName string) (func(), bool) {
+	switch commandName {
+{{- range .UI.Commands }}
+	case {{ printf "%q" .Name }}:
+		return ui.Impl.{{ .Original }}, true
+{{- end }}
+	default:
+		return nil, false
+	}
+}
+
+// UI is an auto-generated UI that describes this program's commands and arguments.
+// To use:
+//
+//   func main() {
+//   	UI.Impl = &yourStruct{...} // assign a {{ .Recv }}
+//   	UI.Run(UI.getCommandMethod, os.Args[1:]) // All given command names will be run
+//   }
+var UI = &generatedUI{
+	UI: {{ .Serialized }},
+}
 `
 
 var tmpl = template.Must(template.New("file").Parse(templateRaw))
@@ -51,6 +76,8 @@ type uiparser struct {
 	ArgStyle     NameStyle
 	IsArg        func(*doc.Func) bool
 	IsCommand    func(*doc.Func) bool
+	// Type name of the reciever that we should discover commands from.
+	Recv string
 }
 
 // IsPublic returns true if the function is public.
@@ -91,7 +118,7 @@ func loadPackageAt(path string) (*token.FileSet, *doc.Package, error) {
 }
 
 // Parse parses a package's documentation into a UI structure.
-func Parse(fset *token.FileSet, pkg *doc.Package) (*UI, error) {
+func Parse(fset *token.FileSet, pkg *doc.Package, recv string) (*UI, error) {
 	p := &uiparser{
 		fset:         fset,
 		pkg:          pkg,
@@ -100,6 +127,7 @@ func Parse(fset *token.FileSet, pkg *doc.Package) (*UI, error) {
 		ArgStyle:     "",
 		IsCommand:    IsPublic,
 		IsArg:        IsScreamingSnake,
+		Recv:         recv,
 	}
 	var err error
 
@@ -140,16 +168,20 @@ func Serialize(ui *UI) string {
 	return string(fmted)
 }
 
-func ToFileContents(ui *UI) string {
+func ToFileContents(ui *UI, recv string) string {
 	var out bytes.Buffer
 	params := struct {
 		Package    string
 		ImportPath string
-		UI         string
+		UI         *UI
+		Serialized string
+		Recv       string
 	}{
 		Package:    "main",
 		ImportPath: importPath,
-		UI:         Serialize(ui),
+		UI:         ui,
+		Serialized: Serialize(ui),
+		Recv:       recv,
 	}
 	err := tmpl.Execute(&out, params)
 	if err != nil {
@@ -202,42 +234,43 @@ func (p *uiparser) FindCommands() ([]Command, error) {
 }
 
 func (p *uiparser) Funcs() []*doc.Func {
-	funcs := append([]*doc.Func{}, p.pkg.Funcs...)
+	funcs := []*doc.Func{}
 	for _, t := range p.pkg.Types {
-		funcs = append(funcs, t.Funcs...)
-		funcs = append(funcs, t.Methods...)
+		for _, f := range t.Methods {
+			if f.Recv == p.Recv {
+				funcs = append(funcs, f)
+			}
+		}
 	}
 	return funcs
 }
 
-var optionalArgs = regexp.MustCompile(`^\s*Optional: (.+)`)
-var requiredArgs = regexp.MustCompile(`^\s*Required: (.+)`)
-var tags = regexp.MustCompile(`^\s*Tags: (.*)`)
-var sep = regexp.MustCompile(`\b +|, *\b`)
-var name = regexp.MustCompile(`[\w_]+`)
+var tagLineRE = regexp.MustCompile(`^\s*(\w+): (.+)`)
+var tagSepRE = regexp.MustCompile(`\b +|, *\b`)
+var validTagRE = regexp.MustCompile(`[\w_:-]+`)
 
-func parseNames(text string) ([]string, error) {
-	names := sep.Split(text, -1)
-	if len(names) == 0 {
-		return nil, fmt.Errorf(`no names found: %q`, text)
+var notTagLine = fmt.Errorf("the given line is of the form `Kind: tag1, tag2, ...`")
+
+func parseTagLine(line string) (kind string, tags []string, err error) {
+	match := tagLineRE.FindStringSubmatch(line)
+	if match == nil {
+		return "", nil, notTagLine
 	}
-	for i, n := range names {
-		if !name.MatchString(n) {
-			return nil, fmt.Errorf(`name %d contains invalid characters: %q`, i, n)
+
+	kind = match[1]
+	tags = tagSepRE.Split(match[2], -1)
+	if len(tags) == 0 {
+		err = fmt.Errorf(`no tags found on line: %q`, line)
+		return
+	}
+	for i, t := range tags {
+		if !validTagRE.MatchString(t) {
+			tags = nil
+			err = fmt.Errorf(`for %q: tag %d contains invalid characters: %q`, kind, i, t)
+			return
 		}
 	}
-	return names, nil
-}
-
-func parseTags(line string, capture *regexp.Regexp) ([]string, error) {
-	if m := capture.FindStringSubmatch(line); m != nil {
-		res, err := parseNames(m[1])
-		if err != nil {
-			return nil, err
-		}
-		return res, nil
-	}
-	return nil, nil
+	return
 }
 
 func (p *uiparser) parseCommand(fn *doc.Func) (Command, error) {
@@ -254,34 +287,28 @@ func (p *uiparser) parseCommand(fn *doc.Func) (Command, error) {
 	lines := strings.Split(desc.Long, "\n")
 	retained := make([]string, 0, len(lines))
 	for _, l := range lines {
-		optional, err := parseTags(l, optionalArgs)
-		if err != nil {
-			return cmd, fmt.Errorf(errprefix+`can't parse "Optional:": %v`, err)
+		kind, tags, err := parseTagLine(l)
+		if err != nil && err != notTagLine {
+			return cmd, fmt.Errorf(errprefix+"%v", err)
 		}
-		if optional != nil {
-			for _, argname := range optional {
+		switch kind {
+		case "Required":
+			for _, argname := range tags {
 				if arg := p.UI.GetArg(argname); arg == nil {
 					return cmd, fmt.Errorf(errprefix+`declared arg is not defined: %q`, argname)
 				}
 			}
-			cmd.Optional = optional
-			continue
-		}
-
-		required, err := parseTags(l, requiredArgs)
-		if err != nil {
-			return cmd, fmt.Errorf(errprefix+`can't parse "Required:": %v`, err)
-		}
-		if required != nil {
-			for _, argname := range required {
+			cmd.Required = tags
+		case "Optional":
+			for _, argname := range tags {
 				if arg := p.UI.GetArg(argname); arg == nil {
-					return cmd, fmt.Errorf(errprefix+`arg %q not defined: %q`, argname, l)
+					return cmd, fmt.Errorf(errprefix+`declared arg is not defined: %q`, argname)
 				}
 			}
-			cmd.Required = required
-			continue
+			cmd.Required = tags
+		default:
+			retained = append(retained, l)
 		}
-		retained = append(retained, l)
 	}
 
 	cmd.Long = strings.Join(retained, "\n")
@@ -310,22 +337,26 @@ func parseShortLong(name, text string) (*Description, error) {
 func (p *uiparser) ParseDescription(fn *doc.Func) (*Description, error) {
 	res, err := parseShortLong(fn.Name, fn.Doc)
 	if err != nil {
-		return nil, fmt.Errorf("for func %v (%v): %v", fn.Name, p.fset.Position(fn.Decl.Pos()), err)
+		return nil, fmt.Errorf("%s: %v", p.fmtfunc(fn), err)
 	}
 	res.Name = fn.Name
 	res.Original = fn.Name
 
 	// parse tags
-	for _, l := range strings.Split(fn.Doc, "\n") {
-		ts, err := parseTags(l, tags)
-		if err != nil {
-			return nil, fmt.Errorf(`can't parse "Tags:": %v`, err)
+	out := make([]string, 0)
+	for _, l := range strings.Split(res.Long, "\n") {
+		kind, ts, err := parseTagLine(l)
+		if err != nil && err != notTagLine {
+			return nil, fmt.Errorf("%s: %v", p.fmtfunc(fn), err)
 		}
-		if len(ts) != 0 {
+		if kind == "Tags" {
 			res.Tags = ts
+		} else {
+			out = append(out, l)
 		}
 	}
 
+	res.Long = strings.Join(out, "\n")
 	return res, nil
 }
 

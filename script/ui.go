@@ -3,6 +3,8 @@ package script
 import (
 	"fmt"
 	"io"
+	"os"
+	"reflect"
 	"strings"
 )
 
@@ -52,6 +54,83 @@ type UI struct {
 	Description
 	Commands []Command
 	Args     []Arg
+}
+
+// Run executes the commands specified by argv[] by calling the methods with
+// those names on `impl`.
+//
+// RunCommands will panic if any error is encountered.
+func (ui *UI) Run(
+	// This function will be called by Run() to find the implemenation for a command name.
+	// You can use the provided ui.DynamicCommandLookup(impl), or you can generate a
+	// completely type-safe UI, and use ui.staticCommandLookup.
+	getCommandMethod func(commandName string) (impl func(), found bool),
+	commandNames []string,
+) {
+	unknown := make([]string, 0)
+	queue := make([]func(), 0, len(commandNames))
+	for _, n := range commandNames {
+		fn, found := getCommandMethod(n)
+		if !found {
+			// special case for "help": provide help on any other commands given and
+			// do nothing else
+			if n == "help" {
+				queue = []func(){ui.HelpFor(commandNames)}
+				break
+			}
+			unknown = append(unknown, n)
+			continue
+		}
+		queue = append(queue, fn)
+	}
+
+	if len(unknown) > 0 {
+		panic(fmt.Sprintf("Unknown commands: %v", unknown))
+	}
+
+	for _, fn := range queue {
+		fn()
+	}
+}
+
+// DynamicCommandLookup returns a function for Run() that looks up the
+// implementation for a command based on the command's Original field.
+//
+// This operation is unsafe, and could panic due to type coercion at runtime.
+// This package provides a tool for generating a type-safe alternative.
+func (ui *UI) DynamicCommandLookup(impl interface{}) func(string) (func(), bool) {
+	t := reflect.TypeOf(impl)
+	return func(name string) (func(), bool) {
+		cmd := ui.GetCommand(name)
+		if cmd == nil {
+			return nil, false
+		}
+		fn, found := t.MethodByName(cmd.Original)
+		if !found {
+			return nil, found
+		}
+		return fn.Func.Interface().(func()), true
+	}
+}
+
+func (ui *UI) HelpFor(commandNames []string) func() {
+	return func() {
+		if len(commandNames) == 0 || (len(commandNames) == 1 && commandNames[0] == "help") {
+			ui.Overview(os.Stdout)
+			return
+		}
+
+		for _, name := range commandNames {
+			// skip help - handled above
+			if name == "help" {
+				continue
+			}
+			err := ui.AboutCommand(name, os.Stdout)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+			}
+		}
+	}
 }
 
 func (ui *UI) namePadding() int {
@@ -112,13 +191,17 @@ func (ui *UI) GetArg(name string) *Arg {
 	return nil
 }
 
-func (ui *UI) AboutCommand(name string, out io.Writer) error {
-	var cmd *Command
-	for _, maybe := range ui.Commands {
-		if maybe.Name == name {
-			cmd = &maybe
+func (ui *UI) GetCommand(name string) *Command {
+	for _, cmd := range ui.Commands {
+		if cmd.Name == name {
+			return &cmd
 		}
 	}
+	return nil
+}
+
+func (ui *UI) AboutCommand(name string, out io.Writer) error {
+	cmd := ui.GetCommand(name)
 	if cmd == nil {
 		return fmt.Errorf("Unknown command %q", name)
 	}
