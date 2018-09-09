@@ -1,4 +1,4 @@
-package script
+package cli
 
 import (
 	"fmt"
@@ -8,6 +8,7 @@ import (
 	"strings"
 )
 
+// Description describes an entity in the CLI
 type Description struct {
 	// Name of this thing
 	Name string

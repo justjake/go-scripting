@@ -1,9 +1,8 @@
-package script
+package cli
 
 import (
 	"bytes"
 	"fmt"
-	"github.com/stretchr/testify/assert"
 	"go/ast"
 	"go/build"
 	"go/doc"
@@ -11,8 +10,9 @@ import (
 	"go/parser"
 	"go/token"
 	"go/types"
-	"os"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 type file struct {
@@ -126,47 +126,49 @@ func main() {
 }
 	`
 
-	//expectedOut := `wat`
-
 	expected := &UI{
 		Description: Description{},
 		Commands: []Command{
 			{
 				Description: Description{
-					Name:  "Show",
-					Short: "Shows all the things.",
-					Long:  "Use show when you need an extensive greeting.",
-					Tags:  nil,
+					Name:     "greet",
+					Short:    "Shows a greeting to NAME.",
+					Long:     "",
+					Tags:     nil,
+					Original: "Greet",
 				},
-				Optional: nil,
+				Optional: []string{"NAME"},
 				Required: nil,
 			},
 			{
 				Description: Description{
-					Name:  "Greet",
-					Short: "Shows a greeting to NAME.",
-					Long:  "",
-					Tags:  nil,
+					Name:     "show",
+					Short:    "Shows all the things.",
+					Long:     "Use show when you need an extensive greeting.",
+					Tags:     nil,
+					Original: "Show",
 				},
-				Optional: []string{"NAME"},
+				Optional: nil,
 				Required: nil,
 			},
 		},
 		Args: []Arg{
 			{
 				Description: Description{
-					Name:  "LAST",
-					Short: "Dog.",
-					Long:  "Tags: foo, bar",
-					Tags:  []string{"foo", "bar"},
+					Name:     "LAST",
+					Short:    "Dog.",
+					Long:     "",
+					Tags:     []string{"foo", "bar"},
+					Original: "LAST",
 				},
 			},
 			{
 				Description: Description{
-					Name:  "NAME",
-					Short: "The user's full name.",
-					Long:  "",
-					Tags:  nil,
+					Name:     "NAME",
+					Short:    "The user's full name.",
+					Long:     "",
+					Tags:     nil,
+					Original: "NAME",
 				},
 			},
 		},
@@ -177,15 +179,15 @@ func main() {
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
-	fmt.Println(Serialize(ui))
 	assert.Equal(t, expected, ui)
 
+	// TODO: figure out how to test that generated code compiles
 	asFile := ToFileContents(ui, "*Fooer")
-	assert.Empty(t, os.Args[0])
-	err = buildErrors([]file{
-		{"main.go", text},
-		{"generated.go", asFile},
-	})
-	assert.Empty(t, err)
+	assert.Equal(t, "", asFile)
+	//err = buildErrors([]file{
+	//{"main.go", text},
+	//{"generated.go", asFile},
+	//})
+	//assert.Empty(t, err)
 	//assert.Equal(t, expectedOut, asFile)
 }
