@@ -85,8 +85,8 @@ type Foo int
 		`bad annotation "@OkayCall(\"seems legit\", 1 + 1, Foo.Bar())": arg 2: unsupported syntax "Foo.Bar()"`,
 	}
 
-	_, pkg := loadPackageString("github.com/justjake/foo/bar", text)
-	p := NewParser()
+	fset, pkg := loadPackageString("github.com/justjake/foo/bar", text)
+	p := NewParser(fset)
 	ast.Walk(p, pkg.Files["example.go"])
 
 	assert.Len(t, p.Errors, len(expectedErrs), "has expected errors count")

@@ -19,27 +19,22 @@ import (
 	"go/parser"
 	"go/printer"
 	"go/token"
+	"regexp"
 	"strconv"
 	"strings"
 )
 
-// Func is the type of annotation functions. All annotation functions take as
-// their first argument the ast.Node to which the annotation is attatched. The
-// remaining interface arguments are the user-supplied literals in the
-// annotation comment, or are ast.Nodes if the user supplied a type name.
-//
-// Any error returned will be wrapped in additional information about the
-// source location and node name.
-type Func func(ast.Node, ...interface{}) error
-
 // Hit describes a successful application of an annotation
 type Hit struct {
-	// C
+	// AST of the annotation. Location information here is garbage
 	*ast.CallExpr
 	// Node the annotation is attatched to
 	From ast.Node
 	// Evaluated arguments
 	Args []interface{}
+	// Location
+	start token.Pos
+	end   token.Pos
 }
 
 // FuncName returns the name of the annotation function
@@ -91,6 +86,9 @@ type Ref struct {
 	ast.Node
 	// The node the annotation is attatched to.
 	From ast.Node
+	// Location
+	start token.Pos
+	end   token.Pos
 }
 
 // Selector returns the referenced path as a dot-seperated string
@@ -113,14 +111,20 @@ type Parser struct {
 	Hits []*Hit
 	// Filled with unsuccessful annotation hits.
 	Errors []error
+	fset   *token.FileSet
 }
 
 // NewParser returns a new Parser with initialized fields
-func NewParser() *Parser {
+func NewParser(fset *token.FileSet) *Parser {
 	return &Parser{
 		Hits:   []*Hit{},
 		Errors: []error{},
+		fset:   fset,
 	}
+}
+
+func (p *Parser) Parse(node ast.Node) {
+	ast.Walk(p, node)
 }
 
 // Visit implements ast.Visitor for Processor.
@@ -138,8 +142,7 @@ func (p *Parser) Visit(nodeIface ast.Node) ast.Visitor {
 }
 
 func (p *Parser) onField(decl *ast.Field) {
-	text := decl.Doc.Text()
-	hits, errs := p.ParseAnnotations(text, decl)
+	hits, errs := p.ParseAnnotations(decl.Doc, decl)
 	p.Errors = append(p.Errors, errs...)
 	p.Hits = append(p.Hits, hits...)
 }
@@ -147,15 +150,13 @@ func (p *Parser) onField(decl *ast.Field) {
 func (p *Parser) onGenDecl(decl *ast.GenDecl) {
 	// represents an import, constant, type or variable declaration
 	// https://devdocs.io/go/go/ast/index#GenDecl
-	text := decl.Doc.Text()
-	hits, errs := p.ParseAnnotations(text, decl)
+	hits, errs := p.ParseAnnotations(decl.Doc, decl)
 	p.Errors = append(p.Errors, errs...)
 	p.Hits = append(p.Hits, hits...)
 }
 
 func (p *Parser) onFuncDecl(decl *ast.FuncDecl) {
-	text := decl.Doc.Text()
-	hits, errs := p.ParseAnnotations(text, decl)
+	hits, errs := p.ParseAnnotations(decl.Doc, decl)
 	p.Errors = append(p.Errors, errs...)
 	p.Hits = append(p.Hits, hits...)
 }
@@ -166,85 +167,127 @@ type parseError struct {
 	error
 }
 
+type localParseError struct {
+	Pos token.Position
+	error
+}
+
+func (pe *localParseError) Error() string {
+	return fmt.Sprintf("%v: %v", pe.Pos, pe.error)
+}
+
 func (pe *parseError) Error() string {
 	return fmt.Sprintf("bad annotation %q: %v", pe.Line, pe.error)
+}
+
+var annotationBeginSingle = regexp.MustCompile(`^// @`)
+
+func ParseComment(fset *token.FileSet, comment *ast.Comment, from ast.Node) ([]*Hit, []error) {
+	if strings.HasPrefix(comment.Text, "/*") {
+		// TODO: multiline
+		return nil, nil
+	}
+
+	m := annotationBeginSingle.FindStringIndex(comment.Text)
+	if m == nil {
+		return nil, nil
+	}
+	offset := m[1]
+	chunk := comment.Text[offset:]
+	startPos := comment.Pos() + token.Pos(offset)
+
+	hit, err := parseAnnotationAt(fset, startPos, chunk, from)
+	if err != nil {
+		return nil, []error{err}
+	}
+	return []*Hit{hit}, nil
+}
+
+func parseAnnotationAt(fset *token.FileSet, startPos token.Pos, chunk string, from ast.Node) (*Hit, error) {
+	locate := func(pos token.Pos) token.Position {
+		return fset.Position(startPos + pos)
+	}
+	// must be an expression
+	expr, err := parser.ParseExpr(chunk)
+	if err != nil {
+		return nil, &localParseError{locate(0), err}
+	}
+
+	// must be a function call expression
+	call, ok := expr.(*ast.CallExpr)
+	if !ok {
+		return nil, &localParseError{locate(expr.Pos()), fmt.Errorf("not a func call, instead %T", expr)}
+	}
+
+	// evaluate arguments. Literals to literals, refs to Ref
+	args := make([]interface{}, len(call.Args))
+	for j, unknownArg := range call.Args {
+		switch arg := unknownArg.(type) {
+		case *ast.Ident:
+			ref := &Ref{
+				Node:  arg,
+				From:  from,
+				start: startPos + arg.Pos(),
+				end:   startPos + arg.End(),
+			}
+			// TODO: check ref now?
+			args[j] = ref
+		case *ast.SelectorExpr:
+			ref := &Ref{
+				Node:  arg,
+				From:  from,
+				start: startPos + arg.Pos(),
+				end:   startPos + arg.End(),
+			}
+			// TODO: check ref now?
+			args[j] = ref
+		case *ast.BasicLit:
+			val, err := evalLit(arg)
+			if err != nil {
+				return nil, &localParseError{locate(arg.Pos()), err}
+			}
+			args[j] = val
+		case *ast.UnaryExpr:
+			val, err := evalLit(arg)
+			if err != nil {
+				return nil, &localParseError{locate(arg.Pos()), err}
+			}
+			args[j] = val
+		default:
+			return nil, &localParseError{
+				Pos:   locate(unknownArg.Pos()),
+				error: fmt.Errorf("unsupported syntax %q", toStr(unknownArg)),
+			}
+		}
+	}
+
+	// tada!
+	return &Hit{
+		CallExpr: call,
+		From:     from,
+		Args:     args,
+		start:    startPos + call.Pos(),
+		end:      startPos + call.End(),
+	}, nil
 }
 
 // ParseAnnotations parses the given text, returning applied annotation hits
 // attatched to the given node. If errors are encountered, returns nil hits,
 // and the errors.
-func (p *Parser) ParseAnnotations(text string, node ast.Node) ([]*Hit, []error) {
-	// base case: no doc
-	if text == "" {
+//
+// TODO: re-work to parse directly from Comment nodes so we can track position exactly
+// for Hit, and also make Hit an ast.Node.
+func (p *Parser) ParseAnnotations(cg *ast.CommentGroup, node ast.Node) ([]*Hit, []error) {
+	if cg == nil || len(cg.List) == 0 {
 		return nil, nil
 	}
-
 	errs := []error{}
 	hits := []*Hit{}
 
-	// line-by-line
-	lines := strings.Split(text, "\n")
-	for i, l := range lines {
-		if len(l) > 0 && l[0] == '@' {
-			// must be an expression
-			expr, err := parser.ParseExpr(l[1:])
-			if err != nil {
-				errs = append(errs, &parseError{l, i, err})
-				continue
-			}
-			// must be a function call expression
-			call, ok := expr.(*ast.CallExpr)
-			if !ok {
-				errs = append(errs, &parseError{l, i, fmt.Errorf("not a func call, instead %T", expr)})
-				continue
-			}
-
-			// TODO: move this to evaluate stage
-			// evaluate arguments. Literals to literals, refs to Ref
-			args := make([]interface{}, len(call.Args))
-			argsHasErrors := false
-			for j, unknownArg := range call.Args {
-				switch arg := unknownArg.(type) {
-				case *ast.Ident:
-					ref := &Ref{
-						Node: arg,
-						From: node,
-					}
-					// TODO: check ref now?
-					args[j] = ref
-				case *ast.SelectorExpr:
-					ref := &Ref{
-						Node: arg,
-						From: node,
-					}
-					// TODO: check ref now?
-					args[j] = ref
-				case *ast.BasicLit:
-					val, err := evalLit(arg)
-					if err != nil {
-						errs = append(errs, &parseError{l, i, fmt.Errorf("arg %d: %v", j, err)})
-						argsHasErrors = true
-						continue
-					}
-					args[j] = val
-				case *ast.UnaryExpr:
-					val, err := evalLit(arg)
-					if err != nil {
-						errs = append(errs, &parseError{l, i, fmt.Errorf("arg %d: %v", j, err)})
-						argsHasErrors = true
-						continue
-					}
-					args[j] = val
-				default:
-					errs = append(errs, &parseError{l, i, fmt.Errorf("arg %d: unsupported syntax %q", j, toStr(unknownArg))})
-					argsHasErrors = true
-				}
-			}
-			if argsHasErrors {
-				continue
-			}
-			hits = append(hits, &Hit{call, node, args})
-		}
+	for _, comment := range cg.List {
+		hit, err := ParseComment(p.fset, comment, node)
+		hits = append(hits, hit...)
+		errs = append(errs, err...)
 	}
 
 	return hits, errs
@@ -261,7 +304,8 @@ func toStr(node ast.Node) string {
 	return buf.String()
 }
 
-// Evals the given node, which must be a BasicLit or a UnaryExpr of a BasicLit
+// Evals the given node, returning the value that it declars. The node must be
+// a BasicLit or a UnaryExpr of a BasicLit.
 func evalLit(node ast.Node) (interface{}, error) {
 	str := toStr(node)
 	var lit *ast.BasicLit
@@ -269,6 +313,9 @@ func evalLit(node ast.Node) (interface{}, error) {
 		lit, ok = unary.X.(*ast.BasicLit)
 		if !ok {
 			return nil, fmt.Errorf("Not a basic literal: %v", unary.X)
+		}
+		if unary.Op != token.SUB {
+			return nil, fmt.Errorf("Unsupported unary operator %v in %q", unary.Op, str)
 		}
 	}
 	if thelit, ok := node.(*ast.BasicLit); ok {
