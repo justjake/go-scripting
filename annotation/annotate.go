@@ -18,6 +18,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/printer"
+	"go/scanner"
 	"go/token"
 	"regexp"
 	"strconv"
@@ -180,43 +181,70 @@ func (pe *parseError) Error() string {
 	return fmt.Sprintf("bad annotation %q: %v", pe.Line, pe.error)
 }
 
-var annotationBeginSingle = regexp.MustCompile(`^// @`)
+var annotationBeginSingle = regexp.MustCompile(`^// ?@`)
+var annotationBeginMulti = regexp.MustCompile(`(?m)^@`)
 
+// ParseComment parses the annotations in a single comment.
 func ParseComment(fset *token.FileSet, comment *ast.Comment, from ast.Node) ([]*Hit, []error) {
+	rg := annotationBeginSingle
 	if strings.HasPrefix(comment.Text, "/*") {
-		// TODO: multiline
+		rg = annotationBeginMulti
+	}
+
+	ms := rg.FindAllStringIndex(comment.Text, -1)
+	if ms == nil {
 		return nil, nil
 	}
 
-	m := annotationBeginSingle.FindStringIndex(comment.Text)
-	if m == nil {
-		return nil, nil
-	}
-	offset := m[1]
-	chunk := comment.Text[offset:]
-	startPos := comment.Pos() + token.Pos(offset)
+	hits := []*Hit{}
+	errs := []error{}
 
-	hit, err := parseAnnotationAt(fset, startPos, chunk, from)
-	if err != nil {
-		return nil, []error{err}
+	for _, m := range ms {
+		offset := m[1]
+		atStart := comment.Text[offset:]
+		end := strings.IndexRune(atStart, '\n')
+		if end == -1 {
+			end = len(atStart)
+		}
+		startPos := comment.Pos() + token.Pos(offset)
+		chunk := atStart[:end]
+		hit, err := parseAnnotationAt(fset, startPos, chunk, from)
+		if err != nil {
+			errs = append(errs, err)
+		} else {
+			hits = append(hits, hit)
+		}
 	}
-	return []*Hit{hit}, nil
+	return hits, errs
+
 }
 
 func parseAnnotationAt(fset *token.FileSet, startPos token.Pos, chunk string, from ast.Node) (*Hit, error) {
-	locate := func(pos token.Pos) token.Position {
-		return fset.Position(startPos + pos)
+	makeErr := func(pos token.Pos, msg interface{}) error {
+		posi := fset.Position(startPos + pos)
+		return fmt.Errorf("%v: %v in %q", posi, msg, chunk)
 	}
 	// must be an expression
 	expr, err := parser.ParseExpr(chunk)
 	if err != nil {
-		return nil, &localParseError{locate(0), err}
+		switch err2 := err.(type) {
+		case *scanner.Error:
+			// rewrite scanner errors to have only correct position
+			return nil, makeErr(token.Pos(err2.Pos.Column-1), fmt.Errorf(err2.Msg))
+		case scanner.ErrorList:
+			// rewrite scanner errors to have only correct position
+			// and pass only the first error
+			return nil, makeErr(token.Pos(err2[0].Pos.Column), fmt.Errorf(err2[0].Msg))
+		default:
+			fmt.Printf("expr err %T: %v", err2, err2)
+			return nil, makeErr(0, err2)
+		}
 	}
 
 	// must be a function call expression
 	call, ok := expr.(*ast.CallExpr)
 	if !ok {
-		return nil, &localParseError{locate(expr.Pos()), fmt.Errorf("not a func call, instead %T", expr)}
+		return nil, makeErr(expr.Pos(), fmt.Errorf("not a func call, instead %T", expr))
 	}
 
 	// evaluate arguments. Literals to literals, refs to Ref
@@ -224,40 +252,41 @@ func parseAnnotationAt(fset *token.FileSet, startPos token.Pos, chunk string, fr
 	for j, unknownArg := range call.Args {
 		switch arg := unknownArg.(type) {
 		case *ast.Ident:
+			if err := identOnlySelector(arg); err != nil {
+				return nil, makeErr(arg.Pos(), err)
+			}
 			ref := &Ref{
 				Node:  arg,
 				From:  from,
 				start: startPos + arg.Pos(),
 				end:   startPos + arg.End(),
 			}
-			// TODO: check ref now?
 			args[j] = ref
 		case *ast.SelectorExpr:
+			if err := identOnlySelector(arg); err != nil {
+				return nil, makeErr(arg.Pos(), err)
+			}
 			ref := &Ref{
 				Node:  arg,
 				From:  from,
 				start: startPos + arg.Pos(),
 				end:   startPos + arg.End(),
 			}
-			// TODO: check ref now?
 			args[j] = ref
 		case *ast.BasicLit:
 			val, err := evalLit(arg)
 			if err != nil {
-				return nil, &localParseError{locate(arg.Pos()), err}
+				return nil, makeErr(arg.Pos(), err)
 			}
 			args[j] = val
 		case *ast.UnaryExpr:
 			val, err := evalLit(arg)
 			if err != nil {
-				return nil, &localParseError{locate(arg.Pos()), err}
+				return nil, makeErr(arg.Pos(), err)
 			}
 			args[j] = val
 		default:
-			return nil, &localParseError{
-				Pos:   locate(unknownArg.Pos()),
-				error: fmt.Errorf("unsupported syntax %q", toStr(unknownArg)),
-			}
+			return nil, makeErr(unknownArg.Pos(), fmt.Errorf("unsupported syntax %q", toStr(unknownArg)))
 		}
 	}
 
@@ -304,6 +333,26 @@ func toStr(node ast.Node) string {
 	return buf.String()
 }
 
+// verify a selectorexpr contains only selectorexpr and ident nodes
+func identOnlySelector(sel ast.Node) error {
+	var err error
+	ast.Inspect(sel, func(node ast.Node) bool {
+		if node == nil {
+			return false
+		}
+		switch v := node.(type) {
+		case *ast.SelectorExpr:
+			return true
+		case *ast.Ident:
+			return true
+		default:
+			err = fmt.Errorf("unsupported syntax %T in ref %q", toStr(sel), v)
+			return false
+		}
+	})
+	return err
+}
+
 // Evals the given node, returning the value that it declars. The node must be
 // a BasicLit or a UnaryExpr of a BasicLit.
 func evalLit(node ast.Node) (interface{}, error) {
@@ -312,17 +361,17 @@ func evalLit(node ast.Node) (interface{}, error) {
 	if unary, ok := node.(*ast.UnaryExpr); ok {
 		lit, ok = unary.X.(*ast.BasicLit)
 		if !ok {
-			return nil, fmt.Errorf("Not a basic literal: %v", unary.X)
+			return nil, fmt.Errorf("not a basic literal: %v", unary.X)
 		}
 		if unary.Op != token.SUB {
-			return nil, fmt.Errorf("Unsupported unary operator %v in %q", unary.Op, str)
+			return nil, fmt.Errorf("unsupported unary operator %v in %q", unary.Op, str)
 		}
 	}
 	if thelit, ok := node.(*ast.BasicLit); ok {
 		lit = thelit
 	}
 	if lit == nil {
-		return nil, fmt.Errorf("Not a basic literal or unary expr: %v", node)
+		return nil, fmt.Errorf("not a basic literal or unary expr: %v", node)
 	}
 	switch lit.Kind {
 	case token.STRING:
