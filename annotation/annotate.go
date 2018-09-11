@@ -19,7 +19,6 @@ import (
 	"go/parser"
 	"go/printer"
 	"go/token"
-	"os"
 	"strconv"
 	"strings"
 )
@@ -43,9 +42,23 @@ type Hit struct {
 	Args []interface{}
 }
 
+// FuncName returns the name of the annotation function
+func (hit *Hit) FuncName() string {
+	return toStr(hit.CallExpr.Fun)
+}
+
 func (hit *Hit) String() string {
-	name := toStr(hit.CallExpr.Fun)
-	return fmt.Sprintf("Hit of %q with args %v", name, hit.Args)
+	var buf bytes.Buffer
+	fmt.Fprint(&buf, "Hit{")
+	fmt.Fprintf(&buf, "%q", toStr(hit.CallExpr.Fun))
+	if len(hit.Args) > 0 {
+		fmt.Fprint(&buf, " with")
+		for _, arg := range hit.Args {
+			fmt.Fprintf(&buf, " %#v", arg)
+		}
+	}
+	fmt.Fprint(&buf, "}")
+	return buf.String()
 }
 
 // RefKind describes the kind of reference to a code entity.
@@ -73,75 +86,24 @@ const (
 // Ref represents a reference to a type, a method of a type, a variable, or a
 // constant in an annotation call.
 type Ref struct {
-	// The reference node itself, parsed from an annotation comment.
-	// Note that the location information of ast.Node is useless, since it's parsed from
-	// A comment.
+	// The reference node itself, parsed from an annotation comment. It's type is
+	// either an *ast.Ident or an *ast.SelectorExpr.
 	ast.Node
 	// The node the annotation is attatched to.
 	From ast.Node
-	// The file that contains the annotation.
-	FromFile *ast.File
-	// The package that contains the annotation.
-	FromPackage *ast.Package
+}
+
+// Selector returns the referenced path as a dot-seperated string
+func (r *Ref) Selector() string {
+	return toStr(r.Node)
 }
 
 func (r *Ref) String() string {
-	var b bytes.Buffer
-	printer.Fprint(&b, token.NewFileSet(), r.Node)
-	return b.String()
+	return r.GoString()
 }
 
-// Lookup returns a slice of objects containing this ref.
-// Eg, for a PkgTypeField, it will return []*ast.Object{thePkg, theType, theField}.
-//
-// See https://github.com/golang/example/blob/master/gotypes/lookup/lookup.go
-func (r *Ref) Lookup() ([]*ast.Object, error) {
-	namePath := strings.Split(r.String(), ".")
-	path := make([]*ast.Object, len(namePath))
-	scope := r.FromFile.Scope
-
-	for i, name := range namePath {
-		// resolve thing in package
-		if i == 0 || path[i-1].Kind == ast.Pkg {
-			if i > 0 {
-				scope = path[i-1].Data.(*ast.Scope)
-			}
-			obj := scope.Lookup(name)
-			if obj == nil {
-				return nil, fmt.Errorf(
-					"Ref %q: cannot resolve %q",
-					r.String(),
-					strings.Join(namePath[0:i], "."),
-				)
-			}
-			path[i] = obj
-			continue
-		}
-
-		// resolve thing in thing
-		parent := path[i-1]
-		if parent.Kind != ast.Typ {
-			// For now we only support resolving fields or methods in types
-			return nil, fmt.Errorf(
-				"Ref %q: cannot resolve %q: references a field within a %v; only fields of types are supported",
-				r.String(),
-				strings.Join(namePath[0:i], "."),
-				parent.Kind,
-			)
-		}
-		//spec := parent.Decl.(*ast.TypeSpec)
-		// XXX: wait... do we actually need to resolve the type information to do this stuff???
-		// Fuuu
-		// TODO: switch to using types.Package for references.
-	}
-
-	return path, nil
-}
-
-func (r *Ref) Kind() RefKind {
-	//path := strings.Split(r.String(), ".")
-	//r.File.Scope.Lookup()
-	return InvalidKind
+func (r *Ref) GoString() string {
+	return fmt.Sprintf("Ref{%q}", r.Selector())
 }
 
 // Processor parses the comments of a Go AST for annotation comments and calls configured
@@ -180,8 +142,11 @@ func (p *Processor) Visit(nodeIface ast.Node) ast.Visitor {
 	return p
 }
 
-func (p *Processor) onField(node *ast.Field) {
-
+func (p *Processor) onField(decl *ast.Field) {
+	text := decl.Doc.Text()
+	hits, errs := p.ParseAnnotations(text, decl)
+	p.Errors = append(p.Errors, errs...)
+	p.Hits = append(p.Hits, hits...)
 }
 
 func (p *Processor) onGenDecl(decl *ast.GenDecl) {
@@ -189,14 +154,15 @@ func (p *Processor) onGenDecl(decl *ast.GenDecl) {
 	// https://devdocs.io/go/go/ast/index#GenDecl
 	text := decl.Doc.Text()
 	hits, errs := p.ParseAnnotations(text, decl)
-	for _, err := range errs {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-	}
 	p.Errors = append(p.Errors, errs...)
 	p.Hits = append(p.Hits, hits...)
 }
 
 func (p *Processor) onFuncDecl(decl *ast.FuncDecl) {
+	text := decl.Doc.Text()
+	hits, errs := p.ParseAnnotations(text, decl)
+	p.Errors = append(p.Errors, errs...)
+	p.Hits = append(p.Hits, hits...)
 }
 
 type parseError struct {
@@ -206,7 +172,7 @@ type parseError struct {
 }
 
 func (pe *parseError) Error() string {
-	return fmt.Sprintf("[%d] %q: %v", pe.Num, pe.Line, pe.error)
+	return fmt.Sprintf("bad annotation %q: %v", pe.Line, pe.error)
 }
 
 // ParseAnnotations parses the given text, returning applied annotation hits
@@ -234,7 +200,7 @@ func (p *Processor) ParseAnnotations(text string, node ast.Node) ([]*Hit, []erro
 			// must be a function call expression
 			call, ok := expr.(*ast.CallExpr)
 			if !ok {
-				errs = append(errs, &parseError{l, i, fmt.Errorf("not a func call expr, instead %t", expr)})
+				errs = append(errs, &parseError{l, i, fmt.Errorf("not a func call, instead %T", expr)})
 				continue
 			}
 
@@ -275,7 +241,7 @@ func (p *Processor) ParseAnnotations(text string, node ast.Node) ([]*Hit, []erro
 					}
 					args[j] = val
 				default:
-					errs = append(errs, &parseError{l, i, fmt.Errorf("arg %d: unsupported syntax: %v", j, unknownArg)})
+					errs = append(errs, &parseError{l, i, fmt.Errorf("arg %d: unsupported syntax %q", j, toStr(unknownArg))})
 					argsHasErrors = true
 				}
 			}

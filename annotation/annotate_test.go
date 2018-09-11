@@ -1,11 +1,12 @@
 package annotation
 
 import (
-	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func loadPackageString(importPath, text string) (*token.FileSet, *ast.Package) {
@@ -34,6 +35,7 @@ import "fmt"
 // @OnType()
 type Thing struct {
 	Name string
+	// @OnField()
 	Age int
 }
 
@@ -58,12 +60,41 @@ func somePriv() int {
 // package, type of package, method of type of package, func of package
 // @RemoteRefs(fmt, fmt.Stringer, fmt.Stringer.String, fmt.Sprintf)
 type Magnitude int
+
+// Mistakes
+// @NotCorrectSyntax.Foo.Bar + 1
+// @MistakeInCall(foo bar)
+// @OkayCall("seems legit", 1 + 1, Foo.Bar())
+type Foo int
 	`
+	expectedStrings := []string{
+		`Hit{"OnImport"}`,
+		`Hit{"OnType"}`,
+		`Hit{"OnField"}`,
+		`Hit{"OnFunc"}`,
+		`Hit{"OnVar"}`,
+		`Hit{"Literals" with "a string" 5 -0.125}`,
+		`Hit{"LocalRefs" with Ref{"Thing"} Ref{"Thing.Greeting"} Ref{"Thing.Name"} Ref{"somePriv"}}`,
+		`Hit{"RemoteRefs" with Ref{"fmt"} Ref{"fmt.Stringer"} Ref{"fmt.Stringer.String"} Ref{"fmt.Sprintf"}}`,
+	}
+
+	expectedErrs := []string{
+		`bad annotation "@NotCorrectSyntax.Foo.Bar + 1": not a func call, instead *ast.BinaryExpr`,
+		`bad annotation "@MistakeInCall(foo bar)": 1:19: missing ',' in argument list`,
+		`bad annotation "@OkayCall(\"seems legit\", 1 + 1, Foo.Bar())": arg 1: unsupported syntax "1 + 1"`,
+		`bad annotation "@OkayCall(\"seems legit\", 1 + 1, Foo.Bar())": arg 2: unsupported syntax "Foo.Bar()"`,
+	}
+
 	_, pkg := loadPackageString("github.com/justjake/foo/bar", text)
 	p := NewProcessor()
 	ast.Walk(p, pkg.Files["example.go"])
-	for _, h := range p.Hits {
-		fmt.Println(h)
+
+	assert.Len(t, p.Errors, len(expectedErrs), "has expected errors count")
+	for i := range p.Errors {
+		assert.Equal(t, expectedErrs[i], p.Errors[i].Error())
 	}
-	t.FailNow() // just to get log lines
+	assert.Len(t, p.Hits, len(expectedStrings), "has expected hits count")
+	for i := range p.Hits {
+		assert.Equal(t, expectedStrings[i], p.Hits[i].String())
+	}
 }
