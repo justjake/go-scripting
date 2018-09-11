@@ -162,23 +162,18 @@ func (p *Parser) onFuncDecl(decl *ast.FuncDecl) {
 	p.Hits = append(p.Hits, hits...)
 }
 
-type parseError struct {
-	Line string
-	Num  int
-	error
-}
-
-type localParseError struct {
+// Most errors returned by ParseComment are ParseErrors.
+type ParseError struct {
+	// Position of error
 	Pos token.Position
+	// Syntax string error is associated with
+	Context string
+	// Inner error
 	error
 }
 
-func (pe *localParseError) Error() string {
-	return fmt.Sprintf("%v: %v", pe.Pos, pe.error)
-}
-
-func (pe *parseError) Error() string {
-	return fmt.Sprintf("bad annotation %q: %v", pe.Line, pe.error)
+func (pe *ParseError) Error() string {
+	return fmt.Sprintf("%v: %v in %q", pe.Pos, pe.error, pe.Context)
 }
 
 var annotationBeginSingle = regexp.MustCompile(`^// ?@`)
@@ -222,21 +217,20 @@ func ParseComment(fset *token.FileSet, comment *ast.Comment, from ast.Node) ([]*
 func parseAnnotationAt(fset *token.FileSet, startPos token.Pos, chunk string, from ast.Node) (*Hit, error) {
 	makeErr := func(pos token.Pos, msg interface{}) error {
 		posi := fset.Position(startPos + pos)
-		return fmt.Errorf("%v: %v in %q", posi, msg, chunk)
+		return &ParseError{posi, chunk, fmt.Errorf("%v", msg)}
 	}
+
 	// must be an expression
 	expr, err := parser.ParseExpr(chunk)
 	if err != nil {
 		switch err2 := err.(type) {
 		case *scanner.Error:
-			// rewrite scanner errors to have only correct position
+			// rewrite scanner errors to have the correct position.
 			return nil, makeErr(token.Pos(err2.Pos.Column-1), fmt.Errorf(err2.Msg))
 		case scanner.ErrorList:
-			// rewrite scanner errors to have only correct position
-			// and pass only the first error
+			// Only return the first error, which is good enough.
 			return nil, makeErr(token.Pos(err2[0].Pos.Column), fmt.Errorf(err2[0].Msg))
 		default:
-			fmt.Printf("expr err %T: %v", err2, err2)
 			return nil, makeErr(0, err2)
 		}
 	}
