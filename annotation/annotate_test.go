@@ -86,7 +86,7 @@ type Foo int
 	}
 
 	_, pkg := loadPackageString("github.com/justjake/foo/bar", text)
-	p := NewProcessor()
+	p := NewParser()
 	ast.Walk(p, pkg.Files["example.go"])
 
 	assert.Len(t, p.Errors, len(expectedErrs), "has expected errors count")

@@ -106,30 +106,25 @@ func (r *Ref) GoString() string {
 	return fmt.Sprintf("Ref{%q}", r.Selector())
 }
 
-// Processor parses the comments of a Go AST for annotation comments and calls configured
-// annotation functions.
-//
-// TODO: split into Parse and Eval stages
-type Processor struct {
-	// Map of annotation names to Funcs that process those annotations.
-	Funcs map[string]Func
-	// Filled with successful annotation hits. For stats.
+// Parser parses the comments of a Go AST for annotation comments and calls
+// configured annotation functions.
+type Parser struct {
+	// Filled with successful annotation hits.
 	Hits []*Hit
-	// Filled with unsuccessful annotation hits. For stats.
+	// Filled with unsuccessful annotation hits.
 	Errors []error
 }
 
-// NewProcessor returns a new Processor with initialized fields
-func NewProcessor() *Processor {
-	return &Processor{
-		Funcs:  make(map[string]Func),
+// NewParser returns a new Parser with initialized fields
+func NewParser() *Parser {
+	return &Parser{
 		Hits:   []*Hit{},
 		Errors: []error{},
 	}
 }
 
 // Visit implements ast.Visitor for Processor.
-func (p *Processor) Visit(nodeIface ast.Node) ast.Visitor {
+func (p *Parser) Visit(nodeIface ast.Node) ast.Visitor {
 	switch node := nodeIface.(type) {
 	case *ast.Field:
 		// TODO: is this correct, or should this be handled within gendecl?
@@ -142,14 +137,14 @@ func (p *Processor) Visit(nodeIface ast.Node) ast.Visitor {
 	return p
 }
 
-func (p *Processor) onField(decl *ast.Field) {
+func (p *Parser) onField(decl *ast.Field) {
 	text := decl.Doc.Text()
 	hits, errs := p.ParseAnnotations(text, decl)
 	p.Errors = append(p.Errors, errs...)
 	p.Hits = append(p.Hits, hits...)
 }
 
-func (p *Processor) onGenDecl(decl *ast.GenDecl) {
+func (p *Parser) onGenDecl(decl *ast.GenDecl) {
 	// represents an import, constant, type or variable declaration
 	// https://devdocs.io/go/go/ast/index#GenDecl
 	text := decl.Doc.Text()
@@ -158,7 +153,7 @@ func (p *Processor) onGenDecl(decl *ast.GenDecl) {
 	p.Hits = append(p.Hits, hits...)
 }
 
-func (p *Processor) onFuncDecl(decl *ast.FuncDecl) {
+func (p *Parser) onFuncDecl(decl *ast.FuncDecl) {
 	text := decl.Doc.Text()
 	hits, errs := p.ParseAnnotations(text, decl)
 	p.Errors = append(p.Errors, errs...)
@@ -178,7 +173,7 @@ func (pe *parseError) Error() string {
 // ParseAnnotations parses the given text, returning applied annotation hits
 // attatched to the given node. If errors are encountered, returns nil hits,
 // and the errors.
-func (p *Processor) ParseAnnotations(text string, node ast.Node) ([]*Hit, []error) {
+func (p *Parser) ParseAnnotations(text string, node ast.Node) ([]*Hit, []error) {
 	// base case: no doc
 	if text == "" {
 		return nil, nil
