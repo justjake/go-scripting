@@ -61,13 +61,12 @@ testdata/annotation_types.go:43:22: unsupported syntax "Foo.Bar()" in "BadCallFn
 	`)
 
 	fset, pkg := parseTestFile("testdata/annotation_types.go")
-	p := NewParser(fset)
-	p.Parse(pkg)
+	hits, errs := Parse(fset, pkg)
 
-	allHits := join(len(p.Hits), func(i int) string { return p.Hits[i].String() })
+	allHits := join(len(hits), func(i int) string { return hits[i].String() })
 	assert.Equal(t, expectedHits, allHits)
 
-	allErrs := join(len(p.Errors), func(i int) string { return p.Errors[i].Error() })
+	allErrs := join(len(errs), func(i int) string { return errs[i].Error() })
 	assert.Equal(t, expectedErrs, allErrs)
 }
 

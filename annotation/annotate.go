@@ -34,8 +34,8 @@ type Hit struct {
 	// Evaluated arguments
 	Args []interface{}
 	// Location
-	start token.Pos
-	end   token.Pos
+	start token.Position
+	end   token.Position
 }
 
 // FuncName returns the name of the annotation function
@@ -57,57 +57,9 @@ func (hit *Hit) String() string {
 	return buf.String()
 }
 
-// RefKind describes the kind of reference to a code entity.
-type RefKind string
-
-const (
-	// InvalidKind is some unknown kind of reference
-	InvalidKind = RefKind("Invalid")
-	// LocalFunc references is a function
-	LocalFunc = RefKind("Func")
-	// LocalType is a type
-	LocalType = RefKind("Type")
-	// LocalTypeField is a field or func in a type
-	LocalTypeField = RefKind("Type.Field")
-	// Pkg is an imported package
-	Pkg = RefKind("pkg")
-	// PkgFunc is a function in an importated package
-	PkgFunc = RefKind("pkg.Func")
-	// PkgType is a type in an imported package
-	PkgType = RefKind("pkg.Type")
-	// PkgTypeField is a field of a type in an imported package
-	PkgTypeField = RefKind("pkg.Type.Field")
-)
-
-// Ref represents a reference to a type, a method of a type, a variable, or a
-// constant in an annotation call.
-type Ref struct {
-	// The reference node itself, parsed from an annotation comment. It's type is
-	// either an *ast.Ident or an *ast.SelectorExpr.
-	ast.Node
-	// The node the annotation is attatched to.
-	From ast.Node
-	// Location
-	start token.Pos
-	end   token.Pos
-}
-
-// Selector returns the referenced path as a dot-seperated string
-func (r *Ref) Selector() string {
-	return toStr(r.Node)
-}
-
-func (r *Ref) String() string {
-	return r.GoString()
-}
-
-func (r *Ref) GoString() string {
-	return fmt.Sprintf("Ref{%q}", r.Selector())
-}
-
 // Parser parses the comments of a Go AST for annotation comments and calls
 // configured annotation functions.
-type Parser struct {
+type annotationParser struct {
 	// Filled with successful annotation hits.
 	Hits []*Hit
 	// Filled with unsuccessful annotation hits.
@@ -115,21 +67,24 @@ type Parser struct {
 	fset   *token.FileSet
 }
 
-// NewParser returns a new Parser with initialized fields
-func NewParser(fset *token.FileSet) *Parser {
-	return &Parser{
+func newParser(fset *token.FileSet) *annotationParser {
+	return &annotationParser{
 		Hits:   []*Hit{},
 		Errors: []error{},
 		fset:   fset,
 	}
 }
 
-func (p *Parser) Parse(node ast.Node) {
+// Parse parses the annotations on node and all sub-nodes, adding hits to Hits,
+// and errors to Errors.
+func Parse(fset *token.FileSet, node ast.Node) ([]*Hit, []error) {
+	p := newParser(fset)
 	ast.Walk(p, node)
+	return p.Hits, p.Errors
 }
 
 // Visit implements ast.Visitor for Processor.
-func (p *Parser) Visit(nodeIface ast.Node) ast.Visitor {
+func (p *annotationParser) Visit(nodeIface ast.Node) ast.Visitor {
 	switch node := nodeIface.(type) {
 	case *ast.Field:
 		// TODO: is this correct, or should this be handled within gendecl?
@@ -142,13 +97,13 @@ func (p *Parser) Visit(nodeIface ast.Node) ast.Visitor {
 	return p
 }
 
-func (p *Parser) onField(decl *ast.Field) {
+func (p *annotationParser) onField(decl *ast.Field) {
 	hits, errs := p.ParseAnnotations(decl.Doc, decl)
 	p.Errors = append(p.Errors, errs...)
 	p.Hits = append(p.Hits, hits...)
 }
 
-func (p *Parser) onGenDecl(decl *ast.GenDecl) {
+func (p *annotationParser) onGenDecl(decl *ast.GenDecl) {
 	// represents an import, constant, type or variable declaration
 	// https://devdocs.io/go/go/ast/index#GenDecl
 	hits, errs := p.ParseAnnotations(decl.Doc, decl)
@@ -156,7 +111,7 @@ func (p *Parser) onGenDecl(decl *ast.GenDecl) {
 	p.Hits = append(p.Hits, hits...)
 }
 
-func (p *Parser) onFuncDecl(decl *ast.FuncDecl) {
+func (p *annotationParser) onFuncDecl(decl *ast.FuncDecl) {
 	hits, errs := p.ParseAnnotations(decl.Doc, decl)
 	p.Errors = append(p.Errors, errs...)
 	p.Hits = append(p.Hits, hits...)
@@ -252,8 +207,8 @@ func parseAnnotationAt(fset *token.FileSet, startPos token.Pos, chunk string, fr
 			ref := &Ref{
 				Node:  arg,
 				From:  from,
-				start: startPos + arg.Pos(),
-				end:   startPos + arg.End(),
+				start: fset.Position(startPos + arg.Pos()),
+				end:   fset.Position(startPos + arg.End()),
 			}
 			args[j] = ref
 		case *ast.SelectorExpr:
@@ -263,8 +218,8 @@ func parseAnnotationAt(fset *token.FileSet, startPos token.Pos, chunk string, fr
 			ref := &Ref{
 				Node:  arg,
 				From:  from,
-				start: startPos + arg.Pos(),
-				end:   startPos + arg.End(),
+				start: fset.Position(startPos + arg.Pos()),
+				end:   fset.Position(startPos + arg.End()),
 			}
 			args[j] = ref
 		case *ast.BasicLit:
@@ -289,8 +244,8 @@ func parseAnnotationAt(fset *token.FileSet, startPos token.Pos, chunk string, fr
 		CallExpr: call,
 		From:     from,
 		Args:     args,
-		start:    startPos + call.Pos(),
-		end:      startPos + call.End(),
+		start:    fset.Position(startPos + call.Pos()),
+		end:      fset.Position(startPos + call.End()),
 	}, nil
 }
 
@@ -300,7 +255,7 @@ func parseAnnotationAt(fset *token.FileSet, startPos token.Pos, chunk string, fr
 //
 // TODO: re-work to parse directly from Comment nodes so we can track position exactly
 // for Hit, and also make Hit an ast.Node.
-func (p *Parser) ParseAnnotations(cg *ast.CommentGroup, node ast.Node) ([]*Hit, []error) {
+func (p *annotationParser) ParseAnnotations(cg *ast.CommentGroup, node ast.Node) ([]*Hit, []error) {
 	if cg == nil || len(cg.List) == 0 {
 		return nil, nil
 	}
