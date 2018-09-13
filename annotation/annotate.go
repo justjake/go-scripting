@@ -20,6 +20,7 @@ import (
 	"go/printer"
 	"go/scanner"
 	"go/token"
+	"go/types"
 	"regexp"
 	"strconv"
 	"strings"
@@ -27,15 +28,18 @@ import (
 
 // Hit describes a successful application of an annotation
 type Hit struct {
-	// AST of the annotation. Location information here is garbage
-	*ast.CallExpr
+	types.Object
 	// Node the annotation is attatched to
 	From ast.Node
+	// AST of the annotation. Location information here is garbage
+	*ast.CallExpr
 	// Evaluated arguments
 	Args []interface{}
 	// Location
 	start token.Position
 	end   token.Position
+	// Type lookup info
+	pkg *types.Package
 }
 
 // FuncName returns the name of the annotation function
@@ -55,6 +59,10 @@ func (hit *Hit) String() string {
 	}
 	fmt.Fprint(&buf, "}")
 	return buf.String()
+}
+
+func (hit *Hit) Lookup() (types.Object, error) {
+
 }
 
 // Parser parses the comments of a Go AST for annotation comments and calls

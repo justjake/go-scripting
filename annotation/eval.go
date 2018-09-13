@@ -6,17 +6,25 @@ import (
 	"go/importer"
 	"go/token"
 	"go/types"
-	"strings"
+	"reflect"
 )
 
-// Func is the type of annotation functions. All annotation functions take as
-// their first argument the ast.Node to which the annotation is attatched. The
-// remaining interface arguments are the user-supplied literals in the
-// annotation comment, or are ast.Nodes if the user supplied a type name.
+// Func is the type of annotation functions, which apply a Hit. Any error
+// returned will be wrapped in additional information about Hit's source
+// location.
+type Func func(*Hit) error
+
+// WrapFunc wraps any function with a type-safe dispatch of a Hit's arguments.
+// Use WrapFunc around your annotation implementations to avoid type-switching
+// each argument.
 //
-// Any error returned will be wrapped in additional information about the
-// source location and node name.
-type Func func(ast.Node, ...interface{}) error
+// See CallFunc for the restrictions on fn's type.
+func WrapFunc(fn interface{}) Func {
+	return func(hit *Hit) error {
+		// TODO: hit as first arg?
+		return CallFunc(fn, hit.Args)
+	}
+}
 
 // RefKind describes the kind of reference to a code entity.
 type RefKind string
@@ -43,11 +51,13 @@ const (
 // Ref represents a reference to a type, a method of a type, a variable, or a
 // constant in an annotation call.
 type Ref struct {
-	// The reference node itself, parsed from an annotation comment. It's type is
-	// either an *ast.Ident or an *ast.SelectorExpr.
-	ast.Node
+	// The object referred to.
+	types.Object
 	// The node the annotation is attatched to.
 	From ast.Node
+	// The reference syntax, parsed from an annotation comment. It's type is
+	// either an *ast.Ident or an *ast.SelectorExpr.
+	ast.Node
 	// Location
 	start token.Position
 	end   token.Position
@@ -60,59 +70,6 @@ func (r *Ref) Selector() string {
 
 func (r *Ref) String() string {
 	return r.GoString()
-}
-
-func (r *Ref) Find(pkg *types.Package, fset *token.FileSet) (types.Object, error) {
-	scope := pkg.Scope().Innermost(r.From.Pos())
-	path := strings.Split(r.Selector(), ".")
-	resolver := &resolver{pkg}
-	var res interface{}
-	var err error
-	res = scope
-	for _, name := range path {
-		res, err = resolver.resolve(res, name)
-		if err != nil {
-			return nil, &RefError{r, err}
-		}
-	}
-	// TODO: should we check this coercion?
-	res2 := res.(types.Object)
-	return res2, nil
-}
-
-type resolver struct {
-	pkg *types.Package
-}
-
-func (r *resolver) resolve(parent interface{}, name string) (types.Object, error) {
-	switch v := parent.(type) {
-	case *types.Scope:
-		_, obj := v.LookupParent(name, 0)
-		if obj == nil {
-			return nil, fmt.Errorf("not found in scope")
-		}
-		return obj, nil
-	case *types.Package:
-		// this is dead code rn, dunno why
-		r.pkg = v
-		obj, err := r.resolve(v.Scope(), name)
-		if err != nil {
-			return nil, fmt.Errorf("%q not found in pkg %v complete %v", name, v, v.Complete())
-		}
-		return obj, nil
-	case types.Object:
-		t := v.Type()
-		// TODO: is `true` the right choice here? Otherwise, we can't resolve
-		// methods on pointer types...
-		obj, _, _ := types.LookupFieldOrMethod(t, true, v.Pkg(), name)
-		if obj == nil {
-			// what if obj represents a package????? wat
-			return nil, fmt.Errorf("%q not found in obj %v", name, v)
-		}
-		return obj, nil
-	default:
-		return nil, fmt.Errorf("lookups in %v (%T) unsupported", v, v)
-	}
 }
 
 // GoString implements fmt.GoStringer for Ref.
@@ -147,7 +104,7 @@ func typecheck(path string, fset *token.FileSet, files []*ast.File) (*types.Pack
 }
 
 // Eval evaluates the annoations in hits with the given funcs.
-func Eval(hits []*Hit, funcs map[string]Func, fset *token.FileSet, pkg *types.Package) []error {
+func Eval(hits []*Hit, funcs map[string]Func) []error {
 	errs := []error{}
 	onErr := func(err error) {
 		if err == nil {
@@ -161,10 +118,73 @@ func Eval(hits []*Hit, funcs map[string]Func, fset *token.FileSet, pkg *types.Pa
 			onErr(&HitError{hit, fmt.Errorf("undefined annotation function %q", hit.FuncName())})
 			continue
 		}
+
+		// populate any refs in hit with type information. we could try to do this
+		// earlier - like at ref creation, already have checked the types or
+		// something. Seems bad, but also a lesser evil than mixing types into the
+		// parse process.
+		//
+		// Maybe Parse() should secretly return a list of all refs? Ew.
+		for _, arg := range hit.Args {
+			if ref, ok := arg.(*Ref); ok {
+				ref.pkg = pkg
+			}
+		}
 		err := fn(hit.From, hit.Args...)
 		if err != nil {
 			onErr(&HitError{hit, err})
 		}
 	}
 	return errs
+}
+
+// CallFunc performs a type-safe call of fn, which can be a void function, or a
+// function that returns an error. If any of the argument types do not match
+// the function's signature, an error is returned.
+// Functions with a ... argument are not supported.
+// CallFunc will never panic due to mistyped arguments.
+func CallFunc(fn interface{}, args ...interface{}) error {
+	fval := reflect.ValueOf(fn)
+	ftype := fval.Type()
+	if fval.Kind() != reflect.Func {
+		return fmt.Errorf("fn not a func, instead %T", fn)
+	}
+	if ftype.IsVariadic() {
+		return fmt.Errorf("variadic fn not supported")
+	}
+	if ftype.NumOut() > 1 {
+		return fmt.Errorf("fn returns >1 value")
+	}
+	if ftype.NumOut() == 1 {
+		out := ftype.Out(0)
+		err := fmt.Errorf("fn returns non error %v", out)
+		if out != reflect.TypeOf(err) {
+			return err
+		}
+	}
+	if ftype.NumIn() != len(args) {
+		return fmt.Errorf("need %d args, have %d args", ftype.NumIn(), len(args))
+	}
+	vargs := make([]reflect.Value, len(args))
+	for i, arg := range args {
+		need := ftype.In(i)
+		have := reflect.TypeOf(arg)
+		if have != need {
+			return fmt.Errorf("arg %d: need %v, have %v", need, have)
+		}
+		vargs[i] = reflect.ValueOf(arg)
+	}
+	// ok, should be good to go?
+	out := fval.Call(vargs)
+	if len(out) == 1 {
+		if err, ok := out[0].Interface().(error); ok {
+			return err
+		}
+		return fmt.Errorf("typed as error, but, not an error: %v", out[0])
+	}
+	if len(out) > 1 {
+		// unreachable??
+		return fmt.Errorf("expected one return value, got %d", len(out))
+	}
+	return nil
 }
