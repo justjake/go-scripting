@@ -7,6 +7,7 @@ import (
 	"go/token"
 	"go/types"
 	"reflect"
+	"strings"
 )
 
 // Func is the type of annotation functions, which apply a Hit. Any error
@@ -72,6 +73,57 @@ func (r *Ref) String() string {
 	return r.GoString()
 }
 
+func resolveRef(r *Ref, pkg *types.Package) (types.Object, error) {
+	scope := pkg.Scope().Innermost(r.From.Pos())
+	path := strings.Split(r.Selector(), ".")
+	var res interface{}
+	var err error
+	res = scope
+	for _, name := range path {
+		res, err = ResolveName(res, name)
+		if err != nil {
+			return nil, &RefError{r, err}
+		}
+	}
+	// TODO: should we check this coercion?
+	res2 := res.(types.Object)
+	return res2, nil
+}
+
+// Resolve name in a value from go/types. Support values are *types.Scope,
+// *types.Package, or types.Object.
+func ResolveName(parent interface{}, name string) (types.Object, error) {
+	switch v := parent.(type) {
+	case *types.Scope:
+		_, obj := v.LookupParent(name, 0)
+		if obj == nil {
+			return nil, fmt.Errorf("%q not found in scope", name)
+		}
+		return obj, nil
+	case *types.Package:
+		obj, err := ResolveName(v.Scope(), name)
+		if err != nil {
+			return nil, fmt.Errorf("%q not found in %v", v)
+		}
+		return obj, nil
+	case *types.PkgName:
+		// a type of object describing a package name ref
+		return ResolveName(v.Imported(), name)
+	case types.Object:
+		// all other objects
+		t := v.Type()
+		// TODO: is `true` the right choice here? Otherwise, we can't resolve
+		// methods on pointer types...
+		obj, _, _ := types.LookupFieldOrMethod(t, true, v.Pkg(), name)
+		if obj == nil {
+			return nil, fmt.Errorf("%q not found in %v", name, v)
+		}
+		return obj, nil
+	default:
+		return nil, fmt.Errorf("lookups in %v (%T) unsupported", v, v)
+	}
+}
+
 // GoString implements fmt.GoStringer for Ref.
 // We need this for some fairly kludgy output formatting reasons.
 func (r *Ref) GoString() string {
@@ -104,7 +156,7 @@ func typecheck(path string, fset *token.FileSet, files []*ast.File) (*types.Pack
 }
 
 // Eval evaluates the annoations in hits with the given funcs.
-func Eval(hits []*Hit, funcs map[string]Func) []error {
+func Eval(hits []*Hit, funcs map[string]Func, pkg *types.Package) []error {
 	errs := []error{}
 	onErr := func(err error) {
 		if err == nil {

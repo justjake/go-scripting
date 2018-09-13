@@ -8,7 +8,14 @@ import (
 
 // This file deals with type checking and resolution.
 
-func ResolveTypes(hits *Hits, pkg *types.Package) error {
+func ResolveTypes(hits []*Hit, pkg *types.Package) []error {
+	errs := []error{}
+	onErr := func(err error) {
+		if err == nil {
+			return
+		}
+		errs = append(errs, err)
+	}
 	for _, hit := range hits {
 		// populate any refs in hit with type information. we could try to do this
 		// earlier - like at ref creation, already have checked the types or
@@ -18,15 +25,18 @@ func ResolveTypes(hits *Hits, pkg *types.Package) error {
 		// Maybe Parse() should secretly return a list of all refs? Ew.
 		for _, arg := range hit.Args {
 			if ref, ok := arg.(*Ref); ok {
-				ref.pkg = pkg
+				objs, err := resolveRef(ref, pkg)
+				onErr(err)
+				if err != nil {
+					return err
+				}
 			}
 		}
 	}
-
-	return nil
+	return errs
 }
 
-func resolveRef(r *Ref, pkg *types.Package) (types.Object, error) {
+func resolveRef(r *Ref, pkg *types.Package) ([]types.Object, error) {
 	scope := pkg.Scope().Innermost(r.From.Pos())
 	path := strings.Split(r.Selector(), ".")
 	var res interface{}
@@ -43,8 +53,9 @@ func resolveRef(r *Ref, pkg *types.Package) (types.Object, error) {
 	return res2, nil
 }
 
-// Resolve name in a value from go/types. Support values are *types.Scope,
-// *types.Package, or types.Object.
+// ResolveName finds the types.Object for the given name in a value from
+// go/types. Support parent types are *types.Scope, *types.Package, and
+// types.Object.
 func ResolveName(parent interface{}, name string) (types.Object, error) {
 	switch v := parent.(type) {
 	case *types.Scope:
