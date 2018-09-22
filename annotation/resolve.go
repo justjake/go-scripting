@@ -10,11 +10,12 @@ import (
 
 func ResolveTypes(hits []*Hit, pkg *types.Package) []error {
 	errs := []error{}
-	onErr := func(err error) {
+	onErr := func(err error) bool {
 		if err == nil {
-			return
+			return false
 		}
 		errs = append(errs, err)
+		return true
 	}
 	for _, hit := range hits {
 		// populate any refs in hit with type information. we could try to do this
@@ -26,10 +27,10 @@ func ResolveTypes(hits []*Hit, pkg *types.Package) []error {
 		for _, arg := range hit.Args {
 			if ref, ok := arg.(*Ref); ok {
 				objs, err := resolveRef(ref, pkg)
-				onErr(err)
-				if err != nil {
-					return err
+				if onErr(err) {
+					continue
 				}
+				ref.Objects = objs
 			}
 		}
 	}
@@ -39,18 +40,21 @@ func ResolveTypes(hits []*Hit, pkg *types.Package) []error {
 func resolveRef(r *Ref, pkg *types.Package) ([]types.Object, error) {
 	scope := pkg.Scope().Innermost(r.From.Pos())
 	path := strings.Split(r.Selector(), ".")
-	var res interface{}
+	objs := []types.Object{}
+	var obj types.Object
 	var err error
-	res = scope
-	for _, name := range path {
-		res, err = ResolveName(res, name)
+	for i, name := range path {
+		if i == 0 {
+			obj, err = ResolveName(scope, name)
+		} else {
+			obj, err = ResolveName(obj, name)
+		}
 		if err != nil {
 			return nil, &RefError{r, err}
 		}
+		objs = append(objs, obj)
 	}
-	// TODO: should we check this coercion?
-	res2 := res.(types.Object)
-	return res2, nil
+	return objs, nil
 }
 
 // ResolveName finds the types.Object for the given name in a value from

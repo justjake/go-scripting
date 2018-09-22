@@ -13,6 +13,7 @@ func newRegexpValue(val *regexp.Regexp) *regexpValue {
 
 func (r *regexpValue) Set(s string) error {
 	v, err := regexp.Compile(s)
+	// XXX does this work?
 	r = (*regexpValue)(v)
 	return err
 }
