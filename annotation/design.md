@@ -53,6 +53,37 @@ https://godoc.org/golang.org/x/tools/go/ast/astutil#PathEnclosingInterval
 which maps from a Pos to a Node, which can be used to go from types.Object ->
 token.Pos -> ast.Node.
 
+### Loading
+
+We need to load the files targeted by the user, parse them, and typecheck them,
+so we can hand everything off to the analysis phases.
+
+```go
+type Loader interface {
+  // Allows adding a file that doesn't exist on disk.
+  IncludeFileContents(path string, contents []byte)
+  // Include this file when loading the package
+  IncludeFile(path string)
+  // Include all go files in the given directory. If filter is non-nil,
+  // include paths that return true from the filter func. Does not recurse.
+  IncludeDir(path string, filter func(string) bool)
+  // Parse the included files and return a new context. Note that a partial
+  // context may be returned even if there is an error value.
+  //
+  // We might want to call Load multiple times if we're worried about analysis
+  // consumers mutating the AST!
+  Load() (*Package, error)
+}
+
+// The stuff loaded!
+type Package struct {
+    Fset   *token.FileSet // file position information
+    Syntax []*ast.File    // the abstract syntax tree of each file
+    Pkg    *types.Package // type information about the package
+    Info   *types.Info    // type information about the syntax trees
+}
+```
+
 ### Analysis
 
 We should follow the model of go/analysis, with several phases that operate with all
