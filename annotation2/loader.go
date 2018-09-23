@@ -16,6 +16,8 @@ import (
 const parseMode = parser.ParseComments
 
 type Loader interface {
+	// Set the package path
+	Path(string)
 	// Allows adding a file that doesn't exist on disk.
 	IncludeFileReader(path string, contents io.Reader)
 	// Include this file when loading the package
@@ -28,7 +30,7 @@ type Loader interface {
 	//
 	// We might want to call Load multiple times if we're worried about analysis
 	// consumers mutating the AST!
-	Load(pkgPath string) (*Package, error)
+	Load() (*Package, error)
 }
 
 // The stuff loaded!
@@ -51,6 +53,11 @@ type loader struct {
 	filedata map[string]io.Reader
 	paths    []string
 	dirs     map[string]func(os.FileInfo) bool
+	pkgpath  string
+}
+
+func (l *loader) Path(s string) {
+	l.pkgpath = s
 }
 
 func (l *loader) IncludeFileReader(path string, contents io.Reader) {
@@ -65,7 +72,7 @@ func (l *loader) IncludeDir(path string, filter func(os.FileInfo) bool) {
 	l.dirs[path] = filter
 }
 
-func (l *loader) Load(pkgPath string) (*Package, error) {
+func (l *loader) Load() (*Package, error) {
 	out := &Package{
 		Fset:   token.NewFileSet(),
 		Syntax: []*ast.File{},
@@ -146,7 +153,7 @@ func (l *loader) Load(pkgPath string) (*Package, error) {
 		Scopes:     make(map[ast.Node]*types.Scope),
 		InitOrder:  make([]*types.Initializer, 0),
 	}
-	pkg, err := config.Check(pkgPath, out.Fset, out.Syntax, out.Info)
+	pkg, err := config.Check(l.pkgpath, out.Fset, out.Syntax, out.Info)
 	addErr(err)
 
 	out.Pkg = pkg

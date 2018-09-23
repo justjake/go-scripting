@@ -162,6 +162,10 @@ type UnitAPI interface {
     Input() interface{}
     // Pass to the next analysis of this package
     SetOutput(interface{})
+
+    // This might be helpful, too.
+    // Add an error to this unit for the given node.
+    Errorf(token.Pos, t string, v ...interface{}) error
 }
 ```
 
@@ -192,6 +196,27 @@ to the second unit.
 
 Successive user-defined units then run, each passing the AnnotationAPI or a
 custom output on to the next unit as input.
+
+
+```
+type Pipeline interface {
+  // Add a step to the pipeline, which will run after the previous step.
+  // Steps have a name and run a function of a Unit.
+  // Steps may log non-fatal errors using UnitAPI.Errorf.
+  // Steps return a result, and an optional error. If an error is returned by
+  // any step, the pipeline aborts there and does not continue.
+  AddStep(name string, run func(UnitAPI) (interface{}, error))
+  // What you'd expect
+  Run() error
+}
+
+func NewPipeline(loader Loader) Pipeline {
+  // ...
+}
+```
+
+This is significantly simplified from the []
+
 
 ### Synthesis
 
