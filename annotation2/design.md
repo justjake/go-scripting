@@ -150,16 +150,17 @@ type UnitAPI interface {
     Pkg() *types.Package // type information about the package
     Info() *types.Info    // type information about the syntax trees
 
+    // We might omit these in the first iteration.
     ObjectLemma(obj types.Object, lemma Lemma) bool
     PackageLemma(pkg *types.Package, lemma Lemma) bool
-
     SetObjectLemma func(obj types.Object, lemma Lemma)
-    SetPackageLemma func(lemma Lemma)
+    SetPackageLemma func(pkg *types.Package, lemma Lemma)
 
     // Simplified for linear units:
     // Get previous analysis of this package
     // For user packages, this returns an AnnotationAPI.
     Input() interface{}
+    // XXX: maybe just return (out interface{}, err error)?
     // Pass to the next analysis of this package
     SetOutput(interface{})
 
