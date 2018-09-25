@@ -8,6 +8,7 @@ import (
 	"go/printer"
 	"go/scanner"
 	"go/token"
+	"go/types"
 	"regexp"
 	"strconv"
 	"strings"
@@ -15,22 +16,36 @@ import (
 
 // Important public interfaces:
 
-// Ref represents a reference to some type from an AST node in a
-// comment or annotation.
-type Ref interface {
-	// Position information
+// Spliced is an interface for extra AST nodes parsed out of comments.
+type Spliced interface {
+	// Position information in the actual file
 	ast.Node
-	// Syntax of the reference. Do not trust the position
-	// information of this node or its children.
+	// Syntax of the node. Do not trust the position information of this node or
+	// its children.
 	Syntax() ast.Node
 	// The AST node in the package that this ref or annotaiton is
 	// attatched to.
 	From() ast.Node
+
+	FromObj(Package) types.Object
+	FromPath(Package) []types.Object
+}
+
+// Ref represents a reference to some type from an AST node in a
+// comment or annotation.
+type Ref interface {
+	Spliced
+
+	ToObj(Package) types.Object
+	ToPath(Package) []types.Object
 }
 
 // Annotation in a comment, attatched to a Go syntax element.
 type Annotation interface {
-	Ref
+	Spliced
+
+	// Unique name of the annotation function
+	Name() string
 	// Annotations are always function call expressions.
 	CallExpr() *ast.CallExpr
 	// The evaluated arguments of the annotation. Basic literals are
@@ -42,31 +57,31 @@ type Annotation interface {
 // A node that was moved from its initial parse location
 // information to somewhere else. Children of this node
 // contain bogus position information
-type moved struct {
+type spliced struct {
 	ast.Node
 	start token.Pos
+	from  ast.Node
 }
 
-func (n *moved) Pos() token.Pos {
+func (n *spliced) Pos() token.Pos {
 	return n.start
 }
 
-func (n *moved) End() token.Pos {
+func (n *spliced) End() token.Pos {
 	delta := n.Node.End() - n.Node.Pos()
 	return n.start + delta
 }
 
-func (n *moved) Syntax() ast.Node {
+func (n *spliced) Syntax() ast.Node {
 	return n.Node
 }
 
-type ref struct {
-	moved
-	from ast.Node
+func (n *spliced) From() ast.Node {
+	return n.from
 }
 
-func (r *ref) From() ast.Node {
-	return r.from
+type ref struct {
+	spliced
 }
 
 type annotation struct {
@@ -76,11 +91,15 @@ type annotation struct {
 }
 
 func (an *annotation) CallExpr() *ast.CallExpr {
-	return an.moved.Node.(*ast.CallExpr)
+	return an.spliced.Node.(*ast.CallExpr)
 }
 
 func (an *annotation) Args() []interface{} {
 	return an.args
+}
+
+func (an *annotation) Name() string {
+	return toStr(an.CallExpr().Fun)
 }
 
 // Parser parses annotations in a package.
