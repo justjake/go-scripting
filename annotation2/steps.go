@@ -108,21 +108,23 @@ func Catalog(unit UnitAPI) (interface{}, error) {
 	hits := unit.Input().([]Annotation)
 	db := newAdb()
 	for _, hit := range hits {
-		obj := hit.Object(unit.Package())
+		obj, err := LookupObject(info, hit.From())
 		if obj == nil {
-			unit.Errorf(hit.Pos(), "%v: cannot find typed object", hit)
+			unit.Errorf(hit.From().Pos(), "%v: cannot find anchor object: %v", hit, err)
 			continue
 		}
 		db.addObj(obj, hit)
 		// also log errors about unresolvable refs, although we take no action.
+		// todo: with a Lemma DB, we could store back-references to the hit.
 		for _, arg := range hit.Args() {
 			if ref, ok := arg.(Ref); ok {
-				if refobj := ref.Object(unit.Package()); refobj == nil {
-					unit.Errorf(ref.Pos(), "warning: %v: cannot find typed object", ref)
+				_, err := LookupRef(pkg, ref)
+				if err != nil {
+					unit.Errorf(ref.Pos(), "warning: %v: cannot find referenced object: %v", ref, err)
 				}
 			}
 		}
 	}
 	// TODO
-	return &AnnotationDB{}, nil
+	return db, nil
 }

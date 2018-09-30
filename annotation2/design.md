@@ -218,6 +218,10 @@ func NewPipeline(loader Loader) Pipeline {
 
 This is significantly simplified from the []
 
+### Querying
+
+**TODO**. I don't know how this should work. I need to implement some
+experimental generators to find out the desired interfaces.
 
 ### Synthesis
 

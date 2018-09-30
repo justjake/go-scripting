@@ -8,7 +8,6 @@ import (
 	"go/printer"
 	"go/scanner"
 	"go/token"
-	"go/types"
 	"regexp"
 	"strconv"
 	"strings"
@@ -27,17 +26,22 @@ type Spliced interface {
 	// attatched to.
 	From() ast.Node
 
-	FromObj(Package) types.Object
-	FromPath(Package) []types.Object
+	// ????
+	//FromObj(Package) types.Object
+	//FromPath(Package) []types.Object
 }
 
-// Ref represents a reference to some type from an AST node in a
-// comment or annotation.
+// Ref represents a reference to an object like a type, a function, or the
+// method ofa type, from an AST node in a comment or annotation.
 type Ref interface {
 	Spliced
 
-	ToObj(Package) types.Object
-	ToPath(Package) []types.Object
+	// ??????
+	//ToObj(Package) types.Object
+	//ToPath(Package) []types.Object
+
+	// Refs are always either Idents or Selectors of idents.
+	Selector() string
 }
 
 // Annotation in a comment, attatched to a Go syntax element.
@@ -84,8 +88,12 @@ type ref struct {
 	spliced
 }
 
+func (r *ref) Selector() string {
+	return toStr(r.Node)
+}
+
 type annotation struct {
-	ref
+	spliced
 	// gotta mess with this
 	args []interface{}
 }
@@ -119,10 +127,11 @@ func (p *Parser) Parse(root ast.Node) []Annotation {
 		case *ast.Field:
 			// TODO: is this correct, or should this be handled within gendecl?
 			hits = append(hits, p.ParseCommentGroup(node.Doc, node)...)
-		case *ast.GenDecl:
-			hits = append(hits, p.ParseCommentGroup(node.Doc, node)...)
 		case *ast.FuncDecl:
 			hits = append(hits, p.ParseCommentGroup(node.Doc, node)...)
+		case *ast.GenDecl:
+			hits = append(hits, p.ParseCommentGroup(node.Doc, node)...)
+			// TODO: handle specs in a GenDecl!!!! Eg, TypeSpec, ValueSpec
 		}
 		return true
 	})
@@ -216,8 +225,7 @@ func (p *Parser) parseAnnotationAt(startPos token.Pos, chunk string, from ast.No
 				return nil, makeErr(arg.Pos(), err)
 			}
 			ref := &ref{
-				moved{arg, startPos + arg.Pos()},
-				from,
+				spliced{arg, startPos + arg.Pos(), from},
 			}
 			args[j] = ref
 		case *ast.SelectorExpr:
@@ -225,8 +233,7 @@ func (p *Parser) parseAnnotationAt(startPos token.Pos, chunk string, from ast.No
 				return nil, makeErr(arg.Pos(), err)
 			}
 			ref := &ref{
-				moved{arg, startPos + arg.Pos()},
-				from,
+				spliced{arg, startPos + arg.Pos(), from},
 			}
 			args[j] = ref
 		case *ast.BasicLit:
@@ -248,10 +255,7 @@ func (p *Parser) parseAnnotationAt(startPos token.Pos, chunk string, from ast.No
 
 	// tada!
 	return &annotation{
-		ref{
-			moved{call, startPos + call.Pos()},
-			from,
-		},
+		spliced{call, startPos + call.Pos(), from},
 		args,
 	}, nil
 }

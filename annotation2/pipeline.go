@@ -1,7 +1,6 @@
 package annotation2
 
 import (
-	"errors"
 	"fmt"
 	"go/token"
 	"os"
@@ -41,10 +40,25 @@ func (u *unit) Input() interface{} {
 	return u.input
 }
 
+// TODO: make easier constructors for this?
+// TODO: should this hold a Spliced and a *FileSet?
+type Error struct {
+	token.Position
+	error
+	message string
+}
+
+func (e *Error) Error() string {
+	if e.message != "" {
+		return fmt.Sprintf("%v: %v", e.Position, e.message)
+	}
+	return fmt.Sprintf("%v: %v", e.Position, e.error)
+}
+
 func (u *unit) Errorf(p token.Pos, t string, v ...interface{}) error {
 	position := u.Package().Fset.Position(p)
 	msg := fmt.Sprintf(t, v...)
-	err := errors.New(position.String() + ": " + msg)
+	err := &Error{position, nil, msg}
 	if len(u.errors) == 0 {
 		u.errors = []error{err}
 	} else {
