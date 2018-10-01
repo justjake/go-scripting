@@ -58,18 +58,21 @@ func LookupObject(info *types.Info, unknown ast.Node) (types.Object, error) {
 	case *ast.FuncDecl:
 		return info.ObjectOf(node.Name), nil
 	case *ast.GenDecl:
-		return nil, fmt.Errorf("%T contains []Spec, try one of those: %v", node, node)
+		if len(node.Specs) == 1 {
+			return LookupObject(info, node.Specs[0])
+		}
+		return nil, fmt.Errorf("%T contains %d Specs: %v", node, len(node.Specs), node)
 	case *ast.ImportSpec:
 		// TODO: construct or otherwise divine a *types.PkgName!
 		return nil, fmt.Errorf("%T unimplemented (should return *types.PkgName): %v", node, node)
 	case *ast.TypeSpec:
 		return info.ObjectOf(node.Name), nil
 	case *ast.ValueSpec:
-		if len(node.Names) == 1 && len(node.Values) == 1 {
+		if len(node.Names) > 0 {
 			return info.ObjectOf(node.Names[0]), nil
 		}
 		// ambiguous reference
-		return nil, fmt.Errorf("%T is ambigous because names %d !== values %d !== 1: %v", node, len(node.Names), len(node.Values), node)
+		return nil, fmt.Errorf("%T is ambiguous because len(Names) %d == 0: %v", node, len(node.Names), node)
 	default:
 		return nil, fmt.Errorf("unsupported node type %T: %v", node, node)
 	}

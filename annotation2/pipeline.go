@@ -65,7 +65,7 @@ func (u *unit) Errorf(p token.Pos, t string, v ...interface{}) error {
 		u.errors = append(u.errors, err)
 	}
 	// XXX: remove fmt.Fprintln here?
-	fmt.Fprintln(os.Stderr, u.name, ":", err)
+	fmt.Fprintln(os.Stderr, fmt.Sprintf("(%s)", u.name), err)
 	return err
 }
 
