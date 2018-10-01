@@ -29,6 +29,9 @@ type Spliced interface {
 	// ????
 	//FromObj(Package) types.Object
 	//FromPath(Package) []types.Object
+
+	// Gotta have this.
+	String() string
 }
 
 // Ref represents a reference to an object like a type, a function, or the
@@ -88,6 +91,14 @@ type ref struct {
 	spliced
 }
 
+func (r *ref) String() string {
+	return fmt.Sprintf("Ref{%v}", r.Selector())
+}
+
+func (r *ref) GoString() string {
+	return r.String()
+}
+
 func (r *ref) Selector() string {
 	return toStr(r.Node)
 }
@@ -96,6 +107,20 @@ type annotation struct {
 	spliced
 	// gotta mess with this
 	args []interface{}
+}
+
+func (an *annotation) String() string {
+	var buf bytes.Buffer
+	fmt.Fprint(&buf, "Annotation{")
+	fmt.Fprintf(&buf, "%s(", toStr(an.CallExpr().Fun))
+	for i, arg := range an.args {
+		if i != 0 {
+			buf.WriteString(", ")
+		}
+		fmt.Fprintf(&buf, "%#v", arg)
+	}
+	fmt.Fprint(&buf, ")}")
+	return buf.String()
 }
 
 func (an *annotation) CallExpr() *ast.CallExpr {
@@ -132,6 +157,7 @@ func (p *Parser) Parse(root ast.Node) []Annotation {
 		case *ast.GenDecl:
 			hits = append(hits, p.ParseCommentGroup(node.Doc, node)...)
 			// TODO: handle specs in a GenDecl!!!! Eg, TypeSpec, ValueSpec
+			// Because ImportSpec and ValueSpec can contain multiple assignments
 		}
 		return true
 	})
@@ -179,7 +205,7 @@ func (p *Parser) ParseComment(comment *ast.Comment, from ast.Node) []Annotation 
 		if end == -1 {
 			end = len(atStart)
 		}
-		startPos := comment.Pos() + token.Pos(offset)
+		startPos := comment.Pos() + token.Pos(offset) - 1
 		chunk := atStart[:end]
 		// ignore error since it's bubbled up as part of the whole UnitAPI shtick.
 		hit, _ := p.parseAnnotationAt(startPos, chunk, from)
@@ -192,7 +218,7 @@ func (p *Parser) ParseComment(comment *ast.Comment, from ast.Node) []Annotation 
 
 func (p *Parser) parseAnnotationAt(startPos token.Pos, chunk string, from ast.Node) (*annotation, error) {
 	makeErr := func(pos token.Pos, msg interface{}) error {
-		return p.Errorf(pos, "%s: %v", chunk, msg)
+		return p.Errorf(startPos+pos, "%s: %v", chunk, msg)
 	}
 
 	// must be an expression
