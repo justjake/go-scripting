@@ -156,8 +156,12 @@ func (p *Parser) Parse(root ast.Node) []Annotation {
 			hits = append(hits, p.ParseCommentGroup(node.Doc, node)...)
 		case *ast.GenDecl:
 			hits = append(hits, p.ParseCommentGroup(node.Doc, node)...)
-			// TODO: handle specs in a GenDecl!!!! Eg, TypeSpec, ValueSpec
-			// Because ImportSpec and ValueSpec can contain multiple assignments
+		case *ast.ImportSpec:
+			hits = append(hits, p.ParseCommentGroup(node.Doc, node)...)
+		case *ast.ValueSpec:
+			hits = append(hits, p.ParseCommentGroup(node.Doc, node)...)
+		case *ast.TypeSpec:
+			hits = append(hits, p.ParseCommentGroup(node.Doc, node)...)
 		}
 		return true
 	})

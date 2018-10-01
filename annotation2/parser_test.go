@@ -48,9 +48,9 @@ Annotation{OnNormalImport()}
 Annotation{OnType()}
 Annotation{OnField()}
 Annotation{OnFunc()}
+Annotation{OnLoneVar()}
 Annotation{OnGroupedConst()}
 Annotation{OnGroupedConstNoValue()}
-Annotation{OnLoneVar()}
 Annotation{OnDoubleVar()}
 Annotation{Literals("a string", 5, -0.125)}
 Annotation{LocalRefs(Ref{Thing}, Ref{Thing.Greeting}, Ref{Thing.Name}, Ref{somePriv})}
