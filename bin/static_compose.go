@@ -160,11 +160,42 @@ func main() {
 	loader := annotation2.NewLoader()
 	loader.IncludeDir(*in, nil)
 	pipeline := annotation2.DefaultPipeline(loader)
-	pipeline.AddStep("StaticCompose: Find", find)
+	pipeline.AddStep("StaticCompose: Find", findStep())
 	pipeline.AddStep("StaticCompose: Generate", generateAndWrite)
 	if err := pipeline.Run(); err != nil {
 		panic(err)
 	}
+}
+
+func findStep() annotation2.Runnable {
+	directives := []*directive{}
+	dispatch := new(annotation2.DispatchStep)
+	dispatch.On("StaticCompose.Inside", func(hit annotation2.Annotation, group string) error {
+		directive := new(directive)
+		if decl, ok := hit.From().(*ast.FuncDecl); ok {
+			directive.FuncDecl = decl
+		} else {
+			return fmt.Errorf("must be attatched to a FuncDecl, instead %T", hit.From())
+		}
+		directive.Inside = group
+		directives = append(directives, directive)
+		dispatch.Out = directives
+		return nil
+	})
+	dispatch.On("StaticCompose.Group", func(hit annotation2.Annotation, group string, format string) error {
+		directive := new(directive)
+		if decl, ok := hit.From().(*ast.FuncDecl); ok {
+			directive.FuncDecl = decl
+		} else {
+			return fmt.Errorf("must be attatched to a FuncDecl, instead %T", hit.From())
+		}
+		directive.Group = group
+		directive.Append = format
+		directives = append(directives, directive)
+		dispatch.Out = directives
+		return nil
+	})
+	return dispatch.Run
 }
 
 func find(unit annotation2.UnitAPI) (interface{}, error) {

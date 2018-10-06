@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"go/ast"
 	"go/types"
+	"reflect"
 	"sort"
 )
 
@@ -151,6 +152,41 @@ func Catalog(unit UnitAPI) (interface{}, error) {
 	return AnnotationAPI(db), nil
 }
 
+type DispatchStep struct {
+	Funcs map[string]interface{}
+	Out   interface{}
+	Unit  UnitAPI
+}
+
+func (ds *DispatchStep) On(name string, cb interface{}) *DispatchStep {
+	if ds.Funcs == nil {
+		ds.Funcs = make(map[string]interface{})
+	}
+	ds.Funcs[name] = cb
+	return ds
+}
+
+func (ds *DispatchStep) Run(unit UnitAPI) (interface{}, error) {
+	ds.Unit = unit
+	db, ok := unit.Input().(AnnotationAPI)
+	if !ok {
+		return nil, fmt.Errorf("input %T is not an AnnotationAPI: %v", unit.Input(), unit.Input())
+	}
+	for _, hit := range db.All() {
+		if fn, ok := ds.Funcs[hit.Name()]; ok {
+			args := append([]interface{}{hit}, hit.Args()...)
+			err := CallFunc(fn, args...)
+			if err != nil {
+				return ds.Out, unit.Errorf(hit.Pos(), "%v: %v", hit, err)
+			}
+		} else {
+			// not found
+			unit.Errorf(hit.Pos(), "handler undefined for %q in %v", hit.Name(), hit)
+		}
+	}
+	return ds.Out, nil
+}
+
 // DefaultPipeline builds a pipeline that runs Parse and Catalog steps, handing
 // a completed AnnotationAPI as the input to the next step added.
 func DefaultPipeline(loader Loader) Pipeline {
@@ -158,4 +194,59 @@ func DefaultPipeline(loader Loader) Pipeline {
 	pipeline.AddStep("annotation2.Parse", Parse)
 	pipeline.AddStep("annotation2.Catalog", Catalog)
 	return pipeline
+}
+
+// CallFunc performs a type-safe call of fn, which can be a void function, or a
+// function that returns an error. If any of the argument types do not match
+// the function's signature, an error is returned.
+// Functions with a ... argument are not supported.
+// CallFunc will never panic due to mistyped arguments.
+func CallFunc(fn interface{}, args ...interface{}) error {
+	fval := reflect.ValueOf(fn)
+	ftype := fval.Type()
+	if fval.Kind() != reflect.Func {
+		return fmt.Errorf("fn not a func, instead %T", fn)
+	}
+	if ftype.IsVariadic() {
+		return fmt.Errorf("variadic fn not supported")
+	}
+	if ftype.NumOut() > 1 {
+		return fmt.Errorf("fn returns >1 value")
+	}
+	if ftype.NumOut() == 1 {
+		var canonicalError *error
+		errtype := reflect.TypeOf(canonicalError).Elem()
+		out := ftype.Out(0)
+		if out != errtype {
+			return fmt.Errorf("fn should return %v, but instead returns %v", errtype, out)
+		}
+	}
+	if ftype.NumIn() != len(args) {
+		return fmt.Errorf("need %d args, have %d args", ftype.NumIn(), len(args))
+	}
+	vargs := make([]reflect.Value, len(args))
+	for i, arg := range args {
+		need := ftype.In(i)
+		have := reflect.TypeOf(arg)
+		if have != need && !have.Implements(need) {
+			return fmt.Errorf("arg %d: need %v, have %v", i, need, have)
+		}
+		vargs[i] = reflect.ValueOf(arg)
+	}
+	// ok, should be good to go?
+	out := fval.Call(vargs)
+	if len(out) == 1 {
+		if err, ok := out[0].Interface().(error); ok {
+			return err
+		}
+		if out[0].Interface() == nil {
+			return nil
+		}
+		return fmt.Errorf("typed as error, but, not an error: %v", out[0])
+	}
+	if len(out) > 1 {
+		// unreachable??
+		return fmt.Errorf("expected one return value, got %d", len(out))
+	}
+	return nil
 }
