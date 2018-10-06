@@ -162,6 +162,13 @@ func (c *staticCompose) OuterAppend() string {
 	return c.outer.Append
 }
 
+func (c *staticCompose) NewName() string {
+	if *mode == "custom" {
+		return c.InnerName() + c.OuterAppend()
+	}
+	return fmt.Sprintf(c.OuterAppend(), c.InnerName())
+}
+
 func (c *staticCompose) OuterArgsDecl() string {
 	return funcFieldListString(c.fset, c.outer.FuncDecl.Type.Params)
 }
@@ -206,8 +213,8 @@ func (c *staticCompose) Render() string {
 }
 
 const composed = `
-// {{.InnerName}}{{.OuterAppend}} is equivalent to {{.InnerRecv}}{{.InnerName}}({{.OuterName}}({{.OuterArgsList}}))
-func {{.InnerRecvDecl}} {{.InnerName}}{{.OuterAppend}}{{.OuterArgsDecl}} {{.InnerReturnDecl}} {
+// {{.NewName}} is equivalent to {{.InnerRecv}}{{.InnerName}}({{.OuterName}}({{.OuterArgsList}}))
+func {{.InnerRecvDecl}} {{.NewName}}{{.OuterArgsDecl}} {{.InnerReturnDecl}} {
 	return {{.InnerRecv}}{{.InnerName}}({{.OuterName}}({{.OuterArgsList}}))
 }
 `
@@ -224,7 +231,7 @@ func main() {
 	loader := annotation2.NewLoader()
 	loader.IncludeDir(*in, nil)
 	pipeline := annotation2.DefaultPipeline(loader)
-	pipeline.AddStep("StaticCompose: Find", lift)
+	pipeline.AddStep("StaticCompose: Find", find)
 	pipeline.AddStep("StaticCompose: Generate", generateAndWrite)
 	if err := pipeline.Run(); err != nil {
 		panic(err)
@@ -255,7 +262,7 @@ func find(unit annotation2.UnitAPI) (interface{}, error) {
 
 func generateAndWrite(unit annotation2.UnitAPI) (interface{}, error) {
 	directives := unit.Input().([]*directive)
-	out, err := generate(directives)
+	out, err := generate(unit.Package().Pkg.Name(), directives, unit.Package().Fset)
 	if err != nil {
 		return out, err
 	}
@@ -263,20 +270,21 @@ func generateAndWrite(unit annotation2.UnitAPI) (interface{}, error) {
 	if err != nil {
 		return out, err
 	}
+	return nil, nil
 }
 
-func generate(pkg string, directives []*directive) ([]byte, error) {
+func generate(pkg string, directives []*directive, fset *token.FileSet) ([]byte, error) {
 	var out bytes.Buffer
 	fmt.Fprintf(&out, "package %s\n", pkg)
 	fmt.Fprintln(&out, "")
 	fmt.Fprintf(&out, "// AUTO-GENERATED WITH %s %v", filepath.Base(os.Args[0]), os.Args[1:])
-	for _, d := range v.directives {
+	for _, d := range directives {
 		if d.Inside == "" {
 			continue
 		}
 		//log.Printf("Put inside %q: %s", d.Inside, funcString(fset, d.FuncDecl))
 		// n^2 here we come.
-		for _, g := range v.directives {
+		for _, g := range directives {
 			if g.Group != d.Inside {
 				continue
 			}
@@ -287,7 +295,7 @@ func generate(pkg string, directives []*directive) ([]byte, error) {
 			out.WriteString(c.Render())
 		}
 	}
-	outImports, err := imports.Process("wat", out.Bytes(), nil)
+	outImports, err := imports.Process("generated_file.go", out.Bytes(), nil)
 	if err != nil {
 		return outImports, err
 	}
@@ -318,7 +326,7 @@ func customMain() {
 			v.VisitFile(p.Files[n])
 		}
 	}
-	outFormat, err := generate(firstPackage, v.directives)
+	outFormat, err := generate(firstPackage, v.directives, fset)
 	if err != nil {
 		panic(err)
 	}
