@@ -167,6 +167,18 @@ func main() {
 	}
 }
 
+/*
+Below you will find three implemenations of the "find" step, which hope to
+illustrate different approaches to handling annotations. The unsafeFindStep
+shows implementing a raw step from scratch. The other two compose
+annoation2.DispatchStep; one is anonymous, and the other is a full type with
+methods and such that could be unit tested.
+
+For large libraries of annotations, the full type approach would probably be the best.
+In fact, we could use annotations to auto-generate the newXXXStep method :D.
+*/
+
+// fully realized step type. lots of ceremony, but also very testable and very readable
 type findStep struct {
 	annotation2.DispatchStep
 	directives []*directive
@@ -211,6 +223,7 @@ func (fs *findStep) onGroup(hit annotation2.Annotation, group string, format str
 	return nil
 }
 
+// this one is messy looking, but needs less typing than a full struct w/ methods
 func manualFindStep() annotation2.Runnable {
 	directives := []*directive{}
 	dispatch := new(annotation2.DispatchStep)
@@ -241,7 +254,8 @@ func manualFindStep() annotation2.Runnable {
 	return dispatch.Run
 }
 
-func find(unit annotation2.UnitAPI) (interface{}, error) {
+// this one is concise, but will panic if any syntax is wrong
+func unsafeFindStep(unit annotation2.UnitAPI) (interface{}, error) {
 	directives := []*directive{}
 	db := unit.Input().(annotation2.AnnotationAPI)
 	for _, hit := range db.All() {
