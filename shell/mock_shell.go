@@ -48,7 +48,7 @@ func (sh *MockShell) AddMock(call MockCall) *MockShell {
 	return sh
 }
 
-// +StaticCompose inside:"formatters"
+// @StaticCompose.Inside("formatters")
 func (sh *MockShell) Out(script string) string {
 	res := sh.popMock(script)
 	if res == nil {
@@ -57,7 +57,7 @@ func (sh *MockShell) Out(script string) string {
 	return res.Stdout
 }
 
-// +StaticCompose inside:"formatters"
+// @StaticCompose.Inside("formatters")
 func (sh *MockShell) OutStatus(script string) (string, error) {
 	res := sh.popMock(script)
 	if res == nil {
@@ -66,7 +66,7 @@ func (sh *MockShell) OutStatus(script string) (string, error) {
 	return res.Stdout, res.ExitError()
 }
 
-// +StaticCompose inside:"formatters"
+// @StaticCompose.Inside("formatters")
 func (sh *MockShell) OutErrStatus(script string) (string, string, error) {
 	res := sh.popMock(script)
 	if res == nil {
@@ -75,7 +75,7 @@ func (sh *MockShell) OutErrStatus(script string) (string, string, error) {
 	return res.Stdout, res.Stderr, res.ExitError()
 }
 
-// +StaticCompose inside:"formatters"
+// @StaticCompose.Inside("formatters")
 func (sh *MockShell) Run(script string) error {
 	res := sh.popMock(script)
 	if res == nil {
@@ -84,7 +84,7 @@ func (sh *MockShell) Run(script string) error {
 	return res.ExitError()
 }
 
-// +StaticCompose inside:"formatters"
+// @StaticCompose.Inside("formatters")
 func (sh *MockShell) Succeeds(script string) bool {
 	res := sh.popMock(script)
 	if res == nil {
