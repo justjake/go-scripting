@@ -4,8 +4,9 @@ package shell
 
 import (
 	"fmt"
-	shellquote "github.com/kballard/go-shellquote"
 	"strings"
+
+	shellquote "github.com/kballard/go-shellquote"
 )
 
 // Raw strings will not be automatically escaped when interpolated into shell
@@ -59,7 +60,7 @@ func stringly(v interface{}) bool {
 // but: any non-Raw values will be escaped first
 //   ScriptPrint(Raw(`cat `), filename, Raw(` | grep -v `, regexp, ` tee log`))
 //
-// +StaticCompose group:"formatters" append:"p"
+// @StaticCompose.Group("formatters", "%sp")
 func ScriptPrint(vs ...interface{}) string {
 	var b strings.Builder
 	for i := 0; i < len(vs); i++ {
@@ -77,7 +78,7 @@ func ScriptPrint(vs ...interface{}) string {
 // formatters.
 //   ScriptPrintf(`cat %s | grep -v %s | tee log`, filename, regexp)
 //
-// +StaticCompose group:"formatters" append:"f"
+// @StaticCompose.Group("formatters", "%sf")
 func ScriptPrintf(scriptformat string, vs ...interface{}) string {
 	escaped := make([]interface{}, len(vs))
 	for i, v := range vs {
