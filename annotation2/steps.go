@@ -154,7 +154,7 @@ func Catalog(unit UnitAPI) (interface{}, error) {
 
 type DispatchStep struct {
 	Funcs map[string]interface{}
-	Out   interface{}
+	Out   func() interface{}
 	Unit  UnitAPI
 }
 
@@ -181,10 +181,14 @@ func (ds *DispatchStep) Run(unit UnitAPI) (interface{}, error) {
 			}
 		} else {
 			// not found
-			unit.Errorf(hit.Pos(), "handler undefined for %q in %v", hit.Name(), hit)
+			// TODO: present the closest handler that is defined instead of printing the whole map
+			unit.Errorf(hit.Pos(), "%v: no handler defined for %q in %v", hit, hit.Name(), ds.Funcs)
 		}
 	}
-	return ds.Out, nil
+	if ds.Out != nil {
+		return ds.Out(), nil
+	}
+	return nil, nil
 }
 
 // DefaultPipeline builds a pipeline that runs Parse and Catalog steps, handing

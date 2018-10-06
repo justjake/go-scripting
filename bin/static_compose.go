@@ -160,16 +160,61 @@ func main() {
 	loader := annotation2.NewLoader()
 	loader.IncludeDir(*in, nil)
 	pipeline := annotation2.DefaultPipeline(loader)
-	pipeline.AddStep("StaticCompose: Find", findStep())
+	pipeline.AddStep("StaticCompose: Find", newFindStep().Run)
 	pipeline.AddStep("StaticCompose: Generate", generateAndWrite)
 	if err := pipeline.Run(); err != nil {
 		panic(err)
 	}
 }
 
-func findStep() annotation2.Runnable {
+type findStep struct {
+	annotation2.DispatchStep
+	directives []*directive
+}
+
+func newFindStep() *findStep {
+	fs := new(findStep)
+	fs.directives = []*directive{}
+	fs.On("StaticCompose.Inside", fs.onInside)
+	fs.On("StaticCompose.Group", fs.onGroup)
+	fs.Out = func() interface{} { return fs.directives }
+	return fs
+}
+
+func (fs *findStep) directiveFrom(hit annotation2.Annotation) (*directive, error) {
+	directive := new(directive)
+	if decl, ok := hit.From().(*ast.FuncDecl); ok {
+		directive.FuncDecl = decl
+	} else {
+		return nil, fmt.Errorf("must be attatched to a FuncDecl, instead %T", hit.From())
+	}
+	fs.directives = append(fs.directives, directive)
+	return directive, nil
+}
+
+func (fs *findStep) onInside(hit annotation2.Annotation, group string) error {
+	dir, err := fs.directiveFrom(hit)
+	if err != nil {
+		return err
+	}
+	dir.Inside = group
+	return nil
+}
+
+func (fs *findStep) onGroup(hit annotation2.Annotation, group string, format string) error {
+	dir, err := fs.directiveFrom(hit)
+	if err != nil {
+		return err
+	}
+	dir.Group = group
+	dir.Append = format
+	return nil
+}
+
+func manualFindStep() annotation2.Runnable {
 	directives := []*directive{}
 	dispatch := new(annotation2.DispatchStep)
+	dispatch.Out = func() interface{} { return directives }
 	dispatch.On("StaticCompose.Inside", func(hit annotation2.Annotation, group string) error {
 		directive := new(directive)
 		if decl, ok := hit.From().(*ast.FuncDecl); ok {
@@ -179,7 +224,6 @@ func findStep() annotation2.Runnable {
 		}
 		directive.Inside = group
 		directives = append(directives, directive)
-		dispatch.Out = directives
 		return nil
 	})
 	dispatch.On("StaticCompose.Group", func(hit annotation2.Annotation, group string, format string) error {
@@ -192,7 +236,6 @@ func findStep() annotation2.Runnable {
 		directive.Group = group
 		directive.Append = format
 		directives = append(directives, directive)
-		dispatch.Out = directives
 		return nil
 	})
 	return dispatch.Run
