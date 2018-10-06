@@ -8,15 +8,11 @@ import (
 	"fmt"
 	"go/ast"
 	"go/format"
-	"go/parser"
 	"go/printer"
 	"go/token"
 	"io/ioutil"
 	"os"
 	"path/filepath"
-	"reflect"
-	"sort"
-	"strings"
 	"text/template"
 
 	"github.com/justjake/go-scripting/annotation2"
@@ -30,66 +26,7 @@ const (
 var (
 	in      = flag.String("in", ".", "Directory of go files to process")
 	outPath = flag.String("out", "static_compose_generated.go", "Output file")
-	mode    = flag.String("mode", "annotation2", "either 'custom' or 'annotation2'")
 )
-
-type visitor struct {
-	directives []*directive
-	fset       *token.FileSet
-}
-
-func (v *visitor) Visit(node ast.Node) ast.Visitor {
-	return v
-}
-
-// Scan the file for comments which may contain directives, and process those.
-func (v *visitor) VisitFile(file *ast.File) {
-	for _, node := range file.Decls {
-		if fdecl, ok := node.(*ast.FuncDecl); ok {
-			v.VisitFuncDecl(fdecl, file)
-		}
-	}
-}
-
-func (v *visitor) VisitFuncDecl(decl *ast.FuncDecl, file *ast.File) {
-	if decl.Doc == nil {
-		return
-	}
-
-	directive := v.ParseCommentGroup(decl.Doc)
-	if directive == nil {
-		return
-	}
-	directive.FuncDecl = decl
-	directive.File = file
-	v.directives = append(v.directives, directive)
-}
-
-// attempt to parse directives from the given comment.
-func (v *visitor) ParseCommentGroup(cg *ast.CommentGroup) *directive {
-	lines := strings.Split(cg.Text(), "\n")
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if i := strings.Index(trimmed, marker); i != 0 {
-			// comment does not start with +StaticCompose
-			continue
-		}
-		rest := strings.TrimPrefix(trimmed, marker+` `)
-		tags := reflect.StructTag(rest)
-		d := &directive{
-			Inside: tags.Get("inside"),
-			Group:  tags.Get("group"),
-			Append: tags.Get("append"),
-		}
-		return d
-	}
-	return nil
-}
-
-type group struct {
-	Name string
-	Fns  []string // TODO
-}
 
 type directive struct {
 	FuncDecl *ast.FuncDecl
@@ -163,9 +100,6 @@ func (c *staticCompose) OuterAppend() string {
 }
 
 func (c *staticCompose) NewName() string {
-	if *mode == "custom" {
-		return c.InnerName() + c.OuterAppend()
-	}
 	return fmt.Sprintf(c.OuterAppend(), c.InnerName())
 }
 
@@ -223,11 +157,6 @@ var tmpl = template.Must(template.New("composed function").Parse(composed))
 
 func main() {
 	flag.Parse()
-	if *mode == "custom" {
-		customMain()
-		return
-	}
-
 	loader := annotation2.NewLoader()
 	loader.IncludeDir(*in, nil)
 	pipeline := annotation2.DefaultPipeline(loader)
@@ -300,38 +229,4 @@ func generate(pkg string, directives []*directive, fset *token.FileSet) ([]byte,
 		return outImports, err
 	}
 	return format.Source(outImports)
-}
-
-func customMain() {
-	fset := token.NewFileSet()
-	packages, err := parser.ParseDir(fset, *in, nil, parser.ParseComments)
-	if err != nil {
-		panic(err)
-	}
-	v := &visitor{
-		directives: []*directive{},
-		fset:       fset,
-	}
-	var firstPackage string
-	for name, p := range packages {
-		if firstPackage == "" || firstPackage == "main" {
-			firstPackage = name
-		}
-		fnames := make([]string, 0, len(p.Files))
-		for n := range p.Files {
-			fnames = append(fnames, n)
-		}
-		sort.Strings(fnames)
-		for _, n := range fnames {
-			v.VisitFile(p.Files[n])
-		}
-	}
-	outFormat, err := generate(firstPackage, v.directives, fset)
-	if err != nil {
-		panic(err)
-	}
-	err = ioutil.WriteFile(*outPath, outFormat, 0644)
-	if err != nil {
-		panic(err)
-	}
 }

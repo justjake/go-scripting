@@ -7,8 +7,7 @@ tmpfile="$(mktemp -t "$(basename "$0").XXXXXX")"
 
 if ! which interfacer ; then
   # dependencies
-  go1.11beta2 get github.com/rjeczalik/interfaces
-  go1.11beta2 get github.com/rjeczalik/interfaces/cmd/interfacer
+  go get github.com/rjeczalik/interfaces/cmd/interfacer
 fi
 
 if [ -e ./shell ]; then
