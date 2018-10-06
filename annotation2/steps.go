@@ -118,7 +118,7 @@ func Parse(unit UnitAPI) (interface{}, error) {
 	if len(hits) < 0 {
 		return nil, fmt.Errorf("parsed nothing in %d files", len(files))
 	}
-	return hits, nil
+	return []Annotation(hits), nil
 }
 
 // Catalog recieves a []Annotation via Input, and builds a database
