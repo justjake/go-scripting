@@ -150,3 +150,12 @@ func Catalog(unit UnitAPI) (interface{}, error) {
 	// TODO
 	return AnnotationAPI(db), nil
 }
+
+// DefaultPipeline builds a pipeline that runs Parse and Catalog steps, handing
+// a completed AnnotationAPI as the input to the next step added.
+func DefaultPipeline(loader Loader) Pipeline {
+	pipeline := NewPipeline(loader)
+	pipeline.AddStep("annotation2.Parse", Parse)
+	pipeline.AddStep("annotation2.Catalog", Catalog)
+	return pipeline
+}

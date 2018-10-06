@@ -50,6 +50,7 @@ var matcher = regexp.MustCompile(openDelimQ + spaces + raw + name + spaces + clo
 // ScriptTemplate panics if a varName is not found in vars.
 //
 // +StaticCompose group:"formatters" append:"t"
+// @StaticCompose.Group("formatters", "%st")
 func ScriptTemplate(template string, vars Lookuper) string {
 	used := make(map[string]bool)
 	return matcher.ReplaceAllStringFunc(template, func(match string) string {

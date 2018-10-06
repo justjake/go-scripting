@@ -77,6 +77,7 @@ func (sh *Shell) Cmd(script string) *exec.Cmd {
 // occurs, it will be printed to the default Stderr.
 //
 // +StaticCompose inside:"formatters"
+// @StaticCompose.Inside("formatters")
 func (sh *Shell) Out(script string) string {
 	cmd := sh.Cmd(script)
 	cmd.Stderr = sh.Stderr

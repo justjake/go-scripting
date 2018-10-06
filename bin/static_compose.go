@@ -11,7 +11,6 @@ import (
 	"go/parser"
 	"go/printer"
 	"go/token"
-	"golang.org/x/tools/imports"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -19,6 +18,9 @@ import (
 	"sort"
 	"strings"
 	"text/template"
+
+	"github.com/justjake/go-scripting/annotation2"
+	"golang.org/x/tools/imports"
 )
 
 const (
@@ -28,6 +30,7 @@ const (
 var (
 	in      = flag.String("in", ".", "Directory of go files to process")
 	outPath = flag.String("out", "static_compose_generated.go", "Output file")
+	mode    = flag.String("mode", "annotation2", "either 'custom' or 'annotation2'")
 )
 
 type visitor struct {
@@ -213,32 +216,58 @@ var tmpl = template.Must(template.New("composed function").Parse(composed))
 
 func main() {
 	flag.Parse()
-	fset := token.NewFileSet()
-	packages, err := parser.ParseDir(fset, *in, nil, parser.ParseComments)
-	if err != nil {
+	if *mode == "custom" {
+		customMain()
+		return
+	}
+
+	loader := annotation2.NewLoader()
+	loader.IncludeDir(*in, nil)
+	pipeline := annotation2.DefaultPipeline(loader)
+	pipeline.AddStep("StaticCompose: Find", lift)
+	pipeline.AddStep("StaticCompose: Generate", generateAndWrite)
+	if err := pipeline.Run(); err != nil {
 		panic(err)
 	}
-	v := &visitor{
-		directives: []*directive{},
-		fset:       fset,
+}
+
+func find(unit annotation2.UnitAPI) (interface{}, error) {
+	directives := []*directive{}
+	db := unit.Input().(annotation2.AnnotationAPI)
+	for _, hit := range db.All() {
+		directive := new(directive)
+		// add directive
+		switch hit.Name() {
+		case "StaticCompose.Inside":
+			directive.Inside = hit.Args()[0].(string)
+		case "StaticCompose.Group":
+			directive.Group = hit.Args()[0].(string)
+			directive.Append = hit.Args()[1].(string)
+		default:
+			unit.Errorf(hit.Pos(), "unknown annotation name: %#v", hit.Name())
+			continue
+		}
+		directive.FuncDecl = hit.From().(*ast.FuncDecl)
+		directives = append(directives, directive)
 	}
-	var firstPackage string
-	for name, p := range packages {
-		if firstPackage == "" || firstPackage == "main" {
-			firstPackage = name
-		}
-		fnames := make([]string, 0, len(p.Files))
-		for n, _ := range p.Files {
-			fnames = append(fnames, n)
-		}
-		sort.Strings(fnames)
-		for _, n := range fnames {
-			v.VisitFile(p.Files[n])
-		}
+	return directives, nil
+}
+
+func generateAndWrite(unit annotation2.UnitAPI) (interface{}, error) {
+	directives := unit.Input().([]*directive)
+	out, err := generate(directives)
+	if err != nil {
+		return out, err
 	}
+	err = ioutil.WriteFile(*outPath, out, 0644)
+	if err != nil {
+		return out, err
+	}
+}
+
+func generate(pkg string, directives []*directive) ([]byte, error) {
 	var out bytes.Buffer
-	// this is a hack.
-	fmt.Fprintf(&out, "package %s\n", firstPackage)
+	fmt.Fprintf(&out, "package %s\n", pkg)
 	fmt.Fprintln(&out, "")
 	fmt.Fprintf(&out, "// AUTO-GENERATED WITH %s %v", filepath.Base(os.Args[0]), os.Args[1:])
 	for _, d := range v.directives {
@@ -260,11 +289,41 @@ func main() {
 	}
 	outImports, err := imports.Process("wat", out.Bytes(), nil)
 	if err != nil {
-		panic(err)
+		return outImports, err
 	}
-	outFormat, err := format.Source(outImports)
+	return format.Source(outImports)
+}
+
+func customMain() {
+	fset := token.NewFileSet()
+	packages, err := parser.ParseDir(fset, *in, nil, parser.ParseComments)
 	if err != nil {
 		panic(err)
 	}
-	ioutil.WriteFile(*outPath, outFormat, 0644)
+	v := &visitor{
+		directives: []*directive{},
+		fset:       fset,
+	}
+	var firstPackage string
+	for name, p := range packages {
+		if firstPackage == "" || firstPackage == "main" {
+			firstPackage = name
+		}
+		fnames := make([]string, 0, len(p.Files))
+		for n := range p.Files {
+			fnames = append(fnames, n)
+		}
+		sort.Strings(fnames)
+		for _, n := range fnames {
+			v.VisitFile(p.Files[n])
+		}
+	}
+	outFormat, err := generate(firstPackage, v.directives)
+	if err != nil {
+		panic(err)
+	}
+	err = ioutil.WriteFile(*outPath, outFormat, 0644)
+	if err != nil {
+		panic(err)
+	}
 }
